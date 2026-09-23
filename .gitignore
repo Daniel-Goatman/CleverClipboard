@@ -1,0 +1,16 @@
+.build/
+*.app/
+results/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local credentials and editor settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.venv/
+.vscode/
+.idea/
