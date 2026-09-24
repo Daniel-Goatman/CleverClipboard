@@ -47,6 +47,7 @@ def hierarchical_destination(context):
     destination['field'] = {
         'label': evidence['label'], 'label_source': evidence['source'],
         'instructions': evidence['help'], 'ambiguous': evidence['ambiguous'],
+        'uncertain': evidence['uncertain'],
         'destination_kind': raw.get('destinationKind', 'editable'),
     }
     if evidence['navigation']:
@@ -54,13 +55,15 @@ def hierarchical_destination(context):
         destination['field']['purpose'] = 'Enter a website address or search the web.'
     if evidence['scope']:
         destination['document']['section'] = clip(evidence['scope'], 240)
-    # With a real insertion anchor, broad OCR adds competing draft text without
-    # adding cursor evidence. Keep it only as explicitly unanchored background.
-    if not destination['insertion']['available']:
+    # resolve() includes only field/ancestor/section associations when a caret
+    # exists. Its broader visible-editor OCR is available only without a caret.
+    # Keep the result explicitly unanchored and below the insertion and field.
+    if evidence['state']:
         destination['document']['unanchored_context'] = clip(evidence['state'], 1000)
+    if raw.get('budgetExhausted') is True:
+        destination['document']['capture_incomplete'] = True
     destination['application'] = {
-        'name': clip(str(raw.get('app', '')), 100),
+        'name': clip(raw['app'], 100) if isinstance(raw.get('app'), str) else '',
+        'window_title': clip(raw['windowTitle'], 160) if isinstance(raw.get('windowTitle'), str) else '',
     }
-    if not destination['insertion']['available']:
-        destination['application']['window_title'] = clip(str(raw.get('windowTitle', '')), 160)
     return destination

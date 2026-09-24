@@ -13,6 +13,20 @@ import Foundation
         (history, pins) = store.load()
         precondition(pins.count == 2 && pins[0].description == "my email address")
         precondition(pins[1].description == "Mobile" && pins[1].value == "+61 400 000 000")
+        let oldClip = #"{"id":"old","text":"legacy","app":"Notes","copiedAt":0}"#
+        let decodedOld = try JSONDecoder().decode(Clip.self, from: Data(oldClip.utf8))
+        precondition(decodedOld.provenance == nil && decodedOld.text == "legacy")
+        let oldLibrary = #"{"version":1,"items":[{"id":"old","text":"legacy","app":"Notes","copiedAt":0}],"pins":[]}"#
+        let decodedLibrary = try JSONDecoder().decode(SavedLibrary.self, from: Data(oldLibrary.utf8))
+        precondition(decodedLibrary.items[0].provenance == nil)
+        let roundtrip = try JSONDecoder().decode(Clip.self, from: JSONEncoder().encode(decodedOld))
+        precondition(roundtrip == decodedOld)
+        let source = ClipProvenance(sourceApp: "Notes", sourceBundleID: "com.apple.Notes",
+            writer: nil, foregroundAtPoll: "Mail", association: "keyboard_copy",
+            windowTitle: "Work", fieldLabel: "Revenue", fieldIdentifier: "revenue", declaredSource: nil)
+        let sourced = Clip(id: "new", text: "1200", app: "Notes", copiedAt: Date(), provenance: source)
+        let restoredSource = try JSONDecoder().decode(Clip.self, from: JSONEncoder().encode(sourced))
+        precondition(restoredSource == sourced)
         pins.append(PinnedEntry(id: 2, description: "work URL", value: "https://example.org"))
         history.add("A sentence", app: "Notes")
         let id = UUID().uuidString, bytes = Data(repeating: 7, count: 300)

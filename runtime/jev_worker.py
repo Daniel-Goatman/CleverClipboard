@@ -2,6 +2,7 @@
 import json
 import sys
 from jev_selector import JevSelector, SelectionError
+from request_dataset import RequestDataset
 
 def emit(value):
     print(json.dumps(value, separators=(',',':')), flush=True)
@@ -13,7 +14,7 @@ def main():
         if len(raw)>4096 or not raw.endswith(b'\n'):
             raise SelectionError('Invalid Jev credential setup.')
         setup = json.loads(raw)
-        selector = JevSelector(setup.pop('api_key',None))
+        selector = JevSelector(setup.pop('api_key',None), recorder=RequestDataset())
         raw = b''; setup = None
         emit({'type':'ready'})
         while True:

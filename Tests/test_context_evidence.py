@@ -37,6 +37,13 @@ class EvidenceTests(unittest.TestCase):
         raw=evidence('',nearby=[near('Maya email',40,305,100)])
         raw['nearbyInputs']=[[160,300,100,40]]
         self.assertEqual(resolve(json.dumps(raw))['label'],'')
+    def test_label_value_grouping_with_intervening_fields(self):
+        raw=evidence('',nearby=[near('Billing email',40,305,100),
+                                 near('Recipient email',280,270,200)])
+        raw['nearbyInputs']=[[160,300,100,40]]
+        result=resolve(json.dumps(raw))
+        self.assertEqual(result['label'],'Recipient email')
+        self.assertEqual(result['source'],'ax:spatial_label')
     def test_semantic_heading_can_supply_scope_without_becoming_label(self):
         raw=evidence('Notes');raw['headings']=[{**near('Project: Orchid',300,100,300),'role':'AXHeading','depth':1}]
         r=resolve(json.dumps(raw))

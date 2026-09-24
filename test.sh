@@ -25,5 +25,5 @@ xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache Sources/His
 xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache Sources/History.swift Sources/ClipboardStore.swift Sources/ImageOCR.swift Sources/PasteboardPayload.swift Tests/AssetPasteboardTests.swift -o .build/asset-pasteboard-tests
 .build/asset-pasteboard-tests
 
-xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache Sources/ImageOCR.swift Sources/ImageThumbnail.swift Tests/ImageOCRTests.swift -o .build/image-tests
+xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache Sources/History.swift Sources/ImageOCR.swift Sources/ImageThumbnail.swift Tests/ImageOCRTests.swift -o .build/image-tests
 .build/image-tests

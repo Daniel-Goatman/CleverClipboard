@@ -7,7 +7,7 @@ import re
 GENERIC = {'', 'text', 'text field', 'text area', 'input', 'edit', 'editor', 'rich text editor', 'search',
            'message', 'message body', 'message content', 'email body', 'mail body', 'reply', 'notes',
            'description', 'comment', 'write a message', 'type here', 'enter text',
-           'the focused editable field', 'form', 'group', 'content', 'web content', 'document', 'body', 'composer'}
+           'the focused editable field', 'form', 'group', 'content', 'web content', 'document', 'body', 'composer', 'cell'}
 BROWSERS = {'com.apple.Safari', 'com.google.Chrome', 'com.microsoft.edgemac', 'org.mozilla.firefox', 'com.brave.Browser'}
 
 def clean(value, limit=240):

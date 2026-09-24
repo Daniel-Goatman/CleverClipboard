@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
-from jev_selector import make_request, result_for, JevSelector, SelectionError, MODEL
+from jev_selector import make_request, result_for, JevSelector, SelectionError, MODEL, request_body, MAX_REQUEST_BYTES
 
 class JevTests(unittest.TestCase):
     def setUp(self):
@@ -36,6 +37,90 @@ class JevTests(unittest.TestCase):
         self.assertEqual(len(ids),50)
         self.assertEqual(len(request['questions']['pick']['criteria']),51)
         self.assertLess(len(json.dumps(request,ensure_ascii=False).encode()),64000)
+        self.assertLessEqual(len(request_body(request)), MAX_REQUEST_BYTES)
+        self.assertTrue(all(c['text_truncated'] for c in request['state']['clipboard']))
+        self.assertTrue(all(v is None for k,v in request['questions']['pick']['criteria'].items() if k != 'NONE'))
+    def test_short_allowance_reused_and_middle_preserved(self):
+        text = 'A'*3000 + 'DISTINGUISHING-MIDDLE' + 'Z'*3000
+        payload = {'context':self.payload['context'], 'items':[
+            {'id':'short','text':'brief','app':'Notes'},
+            {'id':'long','text':text,'app':'Notes'}]}
+        request, ids = make_request(payload)
+        self.assertEqual(ids, ['short','long'])
+        candidates = request['state']['clipboard']
+        self.assertEqual(candidates[0]['text'], 'brief')
+        self.assertIn('DISTINGUISHING-MIDDLE', candidates[1]['text'])
+        self.assertGreater(len(candidates[1]['text'].encode()), 1600)
+        self.assertTrue(candidates[1]['text_truncated'])
+        self.assertEqual(make_request(payload)[0], request)
+    def test_escaping_and_giant_single_item_are_finally_bounded(self):
+        payload = {'context':self.payload['context'], 'items':[
+            {'id':'giant','text':('🙂\\\n\t'*200000), 'app':'Notes',
+             'hint':'OCR: '+('字'*300), 'pinned':True}]}
+        request, ids = make_request(payload)
+        self.assertEqual(ids, ['giant'])
+        self.assertLessEqual(len(request_body(request)), MAX_REQUEST_BYTES)
+        self.assertTrue(request['state']['clipboard'][0]['text_truncated'])
+    def test_52_long_texts_hints_ocr_and_destination_fit_with_ids(self):
+        payload = {'context':'Visible editor context '+('界'*30000), 'items':[
+            {'id':f'item-{i}', 'text':'Image OCR: '+('🧾\\\n'*4000),
+             'app':'Screenshot tool'*20, 'kind':'image', 'hint':'Source label '+('字'*300),
+             'pinned':True} for i in range(52)]}
+        request, ids = make_request(payload)
+        self.assertEqual(ids, [f'item-{i}' for i in range(52)])
+        self.assertEqual([c['id'] for c in request['state']['clipboard']], [f'C{i}' for i in range(52)])
+        self.assertEqual(len(request['questions']['pick']['criteria']), 53)
+        self.assertLessEqual(len(request_body(request)), MAX_REQUEST_BYTES)
+        self.assertTrue(any(c['hint_truncated'] for c in request['state']['clipboard']))
+        self.assertEqual(result_for(self.response(request,'C51'), request, ids)['ranked'][0]['id'], 'item-51')
+    def test_request_boundary_rejects_exactly_over_cap_before_transport(self):
+        request, _ = make_request(self.payload)
+        actual = len(request_body(request))
+        with patch('jev_selector.MAX_REQUEST_BYTES', actual):
+            self.assertEqual(len(request_body(request)), actual)
+        with patch('jev_selector.MAX_REQUEST_BYTES', actual-1):
+            with self.assertRaises(SelectionError): request_body(request)
+        class Connection:
+            calls = 0
+            def request(self,*args): self.calls += 1
+        connection = Connection()
+        selector = JevSelector('test-secret-not-a-real-key', lambda:connection)
+        with patch('jev_selector.MAX_REQUEST_BYTES', 1):
+            with self.assertRaises(SelectionError): selector.rank(self.payload)
+        self.assertEqual(connection.calls, 0)
+    def test_bounded_source_context_reaches_request(self):
+        self.payload['items'][0]['source_context'] = 'Copy event in Safari · Selected field: Revenue'
+        request, _ = make_request(self.payload)
+        candidate = request['state']['clipboard'][0]
+        self.assertEqual(candidate['source_context'], self.payload['items'][0]['source_context'])
+        self.assertFalse(candidate['source_context_truncated'])
+        self.assertIsNone(request['questions']['pick']['criteria']['C0'])
+        self.assertEqual(request['state']['clipboard'][1]['source_context'], 'Source unknown')
+        self.payload['items'][0]['source_context'] = 'x' * 1201
+        with self.assertRaises(SelectionError):
+            make_request(self.payload)
+    def test_source_context_loss_is_flagged_and_budgeted(self):
+        payload = copy.deepcopy(self.payload)
+        payload['items'] = [{'id':'x', 'text':'1200', 'app':'Safari',
+            'source_context':'A'*250 + 'DISTINCT-SOURCE-LABEL' + 'B'*550}]
+        candidate = make_request(payload)[0]['state']['clipboard'][0]
+        self.assertNotIn('DISTINCT-SOURCE-LABEL', candidate['source_context'])
+        self.assertTrue(candidate['source_context_truncated'])
+        payload['items'][0]['source_context'] = 'Copy event in Safari'
+        payload['items'][0]['source_context_truncated'] = True  # Swift already shortened it.
+        self.assertTrue(make_request(payload)[0]['state']['clipboard'][0]['source_context_truncated'])
+        payload['items'][0]['source_context_truncated'] = 'true'
+        with self.assertRaises(SelectionError): make_request(payload)
+
+        crowded = copy.deepcopy(self.payload)
+        crowded['items'] = [{'id':str(i), 'text':'A'*5000 + f'MIDDLE-{i}' + 'Z'*5000,
+            'app':'Safari', 'hint':'h'*1000, 'source_context':'Revenue🙂'*100}
+            for i in range(52)]
+        request, ids = make_request(crowded)
+        self.assertEqual(len(ids), 52)
+        self.assertLessEqual(len(request_body(request)), MAX_REQUEST_BYTES)
+        self.assertTrue(all(c['source_context_truncated'] for c in request['state']['clipboard']))
+        self.assertTrue(all(c['text_truncated'] for c in request['state']['clipboard']))
     def test_20_saved_entries_fit_with_32_recent_history_items(self):
         payload=copy.deepcopy(self.payload)
         history=[{'id':f'history-{i}','text':f'History {i}','app':'Notes','kind':'text',

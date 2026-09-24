@@ -3,22 +3,30 @@ import Carbon
 import OSLog
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var history = History()
     private var pins = PinnedEntry.defaults
     private let store = ClipboardStore()
     private let historyModel = HistoryWindowModel()
     private var historyWindow: NSWindow?
     private var lastChange = NSPasteboard.general.changeCount
+    private var lastClipboardPollUptime = ProcessInfo.processInfo.systemUptime
+    private var copyForegroundGate = CopyForegroundGate()
+    private var recentCopy: CopyObservation?
+    private var clipboardProvenance: ClipProvenance?
+    private var copyMonitor: Any?
+    private var activationMonitor: NSObjectProtocol?
     private var clipboardAssetID: String?
     private var paused = false
     private var ready = false
     private var status = "Starting Jev…"
+    private var workerStatus = "Starting Jev…"
     private var statusItem: NSStatusItem!
     private var worker: ModelWorker!
     private var timer: Timer?
     private var warmTimer: Timer?
     private var hotKey: EventHotKeyRef?
+    private var shortcutRegistered = false
     private var shortcutLatch = ShortcutLatch()
     private var shortcutReleaseTimer: Timer?
     private var escapeMonitor: Any?
@@ -41,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        installMainMenu()
         (history, pins) = store.load()
         configureHistoryModel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -54,6 +63,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if event.keyCode == 53 { self?.cancel() }
             return event
         }
+        // Observe a normal copy without consuming or replaying the event.
+        copyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 8, event.modifierFlags.contains(.command),
+                  !event.modifierFlags.contains(.option), !event.modifierFlags.contains(.control),
+                  !event.modifierFlags.contains(.shift) else { return }
+            self?.observeCopy(event: event)
+        }
+        activationMonitor = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.copyForegroundGate.activated(at: ProcessInfo.processInfo.systemUptime)
+        }
+        copyForegroundGate.observePoll(pid: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         if fixture {
             history.add("21 Paperbark Lane, Perth WA 6000", app: "Maps")
             history.add("hello@example.com", app: "Contacts")
@@ -71,7 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         worker = ModelWorker(root: root)
         worker.onState = { [weak self] message, isReady in
             guard let self else { return }
-            self.ready = isReady; self.status = message; self.rebuildMenu()
+            self.ready = isReady
+            self.workerStatus = message
+            self.status = self.shortcutRegistered ? message : "⌘⇧V is in use. Use Smart Paste from the menu. · \(message)"
+            self.rebuildMenu()
             if self.pulseTimer == nil { self.updateIcon() }
             self.writeLaunchStatus(ready: isReady)
             if isReady && !self.verifiedJev && ProcessInfo.processInfo.arguments.contains("--verify-jev") {
@@ -96,8 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Diagnostic flags only: no clipboard/context/key content.
         var data: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier,
             "bundle": Bundle.main.bundlePath, "worker_ready": ready,
+            "shortcut_registered": shortcutRegistered,
             "accessibility": AXIsProcessTrusted(), "screen_capture": CGPreflightScreenCaptureAccess(),
-            "backend": "jev-1.13.0", "worker_status": status,
+            "backend": "jev-1.13.0", "worker_status": workerStatus,
             "timestamp": Date().timeIntervalSince1970]
         if let smokePassed { data["synthetic_api_selection_passed"] = smokePassed }
         let file = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("results/jev-app/launch-status.json")
@@ -124,6 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let hotKey { UnregisterEventHotKey(hotKey) }
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         if let localEscapeMonitor { NSEvent.removeMonitor(localEscapeMonitor) }
+        if let copyMonitor { NSEvent.removeMonitor(copyMonitor) }
+        if let activationMonitor { NSWorkspace.shared.notificationCenter.removeObserver(activationMonitor) }
         timer?.invalidate(); warmTimer?.invalidate(); pulseTimer?.invalidate()
     }
 
@@ -147,7 +175,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, specs.count, &specs, Unmanaged.passUnretained(self).toOpaque(), nil)
         let result = RegisterEventHotKey(UInt32(kVK_ANSI_V), UInt32(cmdKey | shiftKey),
             EventHotKeyID(signature: 0x4C415941, id: 1), GetApplicationEventTarget(), 0, &hotKey)
-        if result != noErr { status = "⌘⇧V is in use. Use Smart Paste from the menu." }
+        shortcutRegistered = result == noErr
+        if !shortcutRegistered { status = "⌘⇧V is in use. Use Smart Paste from the menu." }
     }
 
     // Carbon can report release when a modifier lifts before V. Only a physical
@@ -164,33 +193,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func observeCopy(event: NSEvent) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        // A late asynchronous monitor callback must not be applied to the next change.
+        guard event.timestamp > lastClipboardPollUptime,
+              uptime >= event.timestamp, uptime - event.timestamp <= 0.15 else { return }
+        let observedAt = Date().addingTimeInterval(event.timestamp - uptime)
+        let priorChange = NSPasteboard.general.changeCount
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let bundleID = app.bundleIdentifier else { recentCopy = nil; return }
+        guard copyForegroundGate.allows(eventAt: event.timestamp, callbackAt: uptime,
+                                        pid: app.processIdentifier) else { recentCopy = nil; return }
+        var selected: String?, label: String?, fieldIdentifier: String?, windowTitle: String?
+        if AXIsProcessTrusted(), !IsSecureEventInputEnabled() {
+            let root = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(root, 0.08)
+            if let focused = axElement(root, kAXFocusedUIElementAttribute),
+               !axText(focused, kAXSubroleAttribute).localizedCaseInsensitiveContains("secure") {
+                AXUIElementSetMessagingTimeout(focused, 0.04)
+                if let rawRange = axValue(focused, kAXSelectedTextRangeAttribute),
+                   CFGetTypeID(rawRange) == AXValueGetTypeID() {
+                    var range = CFRange()
+                    if AXValueGetValue(rawRange as! AXValue, .cfRange, &range),
+                       range.length > 0, range.length <= 1024 {
+                        selected = (axValue(focused, kAXSelectedTextAttribute) as? String).flatMap {
+                            $0.utf8.count <= 1024 && !$0.isEmpty ? $0 : nil
+                        }
+                    }
+                }
+                if selected != nil {
+                    fieldIdentifier = axText(focused, "AXIdentifier")
+                    let titleElement = axElement(focused, kAXTitleUIElementAttribute)
+                    label = titleElement.map { axText($0, kAXValueAttribute) } ??
+                        [kAXTitleAttribute, kAXDescriptionAttribute, "AXPlaceholderValue"]
+                            .map { axText(focused, $0) }.first { !$0.isEmpty }
+                    if let window = axElement(root, kAXFocusedWindowAttribute) {
+                        windowTitle = axText(window, kAXTitleAttribute)
+                    }
+                }
+            }
+        }
+        recentCopy = CopyObservation(app: app.localizedName ?? bundleID, bundleID: bundleID,
+                                     at: observedAt, pasteboardChange: priorChange,
+                                     windowTitle: windowTitle, fieldLabel: label,
+                                     fieldIdentifier: fieldIdentifier, selectedText: selected)
+    }
+
     private func pollClipboard() {
         let pb = NSPasteboard.general
+        let foreground = NSWorkspace.shared.frontmostApplication
+        defer { copyForegroundGate.observePoll(pid: foreground?.processIdentifier) }
         guard pb.changeCount != lastChange else { return }
         lastChange = pb.changeCount
+        lastClipboardPollUptime = ProcessInfo.processInfo.systemUptime
+        let observed = foreground?.localizedName
+        let declared = pb.string(forType: NSPasteboard.PasteboardType("org.nspasteboard.source"))
+        let copiedText = pb.string(forType: .string)
+        let provenance = ClipProvenance.resolve(observation: recentCopy, changedAt: Date(),
+            changeCount: pb.changeCount, foreground: observed, declaredSource: declared,
+            payload: copiedText)
+        clipboardProvenance = provenance
+        recentCopy = nil
         clipboardAssetID = nil
         if selecting { showError("Clipboard changed. Press ⌘⇧V to try again.") }
         guard !paused, !History.shouldIgnore(types: (pb.types ?? []).map(\.rawValue)) else { return }
-        let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "App"
+        let app = provenance.sourceApp ?? "Unknown source"
         if let kind = [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")].first(where: { pb.data(forType: $0) != nil }),
            let data = pb.data(forType: kind), data.count <= History.maximumItemBytes {
             let id = UUID().uuidString
             do {
                 try store.writeImage(data, id: id)
-                guard history.addImage(id: id, dataCount: data.count, type: kind.rawValue, app: app) else { return }
+                guard history.addImage(id: id, dataCount: data.count, type: kind.rawValue,
+                                       app: app, provenance: provenance) else { return }
+                guard let revision = history.items.first(where: { $0.id == id })?.imageRevision else { return }
                 persistHistory()
                 DispatchQueue.global(qos: .utility).async { [weak self] in
-                    let words = ImageOCR.recognize(data)
+                    let result = ImageOCR.analyze(data)
                     DispatchQueue.main.async {
-                        guard let self, self.history.items.contains(where: { $0.id == id }) else { return }
-                        self.history.updateOCR(id: id, text: words)
+                        guard let self,
+                              self.history.updateOCR(id: id, imageRevision: revision, result: result) else { return }
                         self.persistHistory()
                     }
                 }
             } catch { operationStatus = "Could not store copied image"; rebuildMenu() }
             return
         }
-        if let text = pb.string(forType: .string), history.add(text, app: app) { persistHistory() }
+        if let text = copiedText, history.add(text, app: app, provenance: provenance) { persistHistory() }
     }
 
     @objc func smartPaste() {
@@ -288,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.showError("Could not prepare the clipboard."); return
             }
             self.lastChange = pb.changeCount
+            self.clipboardProvenance = .ownWrite(original: self.clipboardProvenance)
         }
         if !useLatestClipboard, let selected {
             guard let payload = PasteboardPayload(clip: selected, store: store) else {
@@ -295,6 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             guard payload.write(to: pb) else { self.showError("Could not prepare the clipboard."); return }
             self.lastChange = pb.changeCount
+            self.clipboardProvenance = .ownWrite(original: selected.provenance)
             self.clipboardAssetID = selected.assetID
         }
         // Ordinary fallback leaves the system pasteboard (including rich formats)
@@ -395,6 +485,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
     }
 
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem(title: "Jev Clipboard", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu()
+        let quitItem = appMenu.addItem(withTitle: "Quit Jev Clipboard", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApp
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        for (title, action, key, modifiers) in [
+            ("Undo", "undo:", "z", NSEvent.ModifierFlags.command),
+            ("Redo", "redo:", "z", [.command, .shift]),
+            ("Cut", "cut:", "x", .command),
+            ("Copy", "copy:", "c", .command),
+            ("Paste", "paste:", "v", .command),
+            ("Select All", "selectAll:", "a", .command)
+        ] {
+            let item = NSMenuItem(title: title, action: Selector(action), keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            editMenu.addItem(item)
+        }
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
+    }
+
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self; menu.addItem(item)
@@ -460,6 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let pb = NSPasteboard.general
         guard let payload = PasteboardPayload(clip: clip, store: store), payload.write(to: pb) else { return }
         lastChange = pb.changeCount
+        clipboardProvenance = .ownWrite(original: clip.provenance)
         clipboardAssetID = clip.assetID
         operationStatus = "Copied \(clip.kind.rawValue)"
         refreshHistoryModel(); rebuildMenu()
@@ -473,11 +592,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.center()
             window.contentView = NSHostingView(rootView: HistoryWindowView(model: historyModel))
             window.isReleasedWhenClosed = false
+            window.delegate = self
             historyWindow = window
         }
         refreshHistoryModel()
+        NSApp.setActivationPolicy(.regular)
+        historyWindow?.deminiaturize(nil)
         historyWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 
     @objc private func configureJev() {

@@ -23,6 +23,25 @@ struct WorkerReply: Decodable {
 
 /// One serial, private pipe worker. No listening port and no saved request content.
 final class ModelWorker {
+    static func requestPayload(context: String, clips: [Clip], now: Date = Date()) -> [String: Any] {
+        let excerpts = CandidateText.forClips(clips)
+        return ["context": context,
+            "items": clips.enumerated().map { index, clip in
+                let source = clip.candidateSourceContext ?? clip.provenance?.requestContext ?? "Source unknown"
+                let sourceExcerpt = String(source.prefix(300))
+                return ["id": clip.id,
+                 "text": excerpts[index],
+                 "text_truncated": excerpts[index] != clip.candidateText,
+                 "app": String((clip.pinned ? "Persistent entry" : clip.provenance?.sourceApp ?? "Unknown source").prefix(200)),
+                 "source_context": sourceExcerpt,
+                 "source_context_truncated": sourceExcerpt != source,
+                 "kind": clip.kind.rawValue,
+                 "recency_rank": index,
+                 "age_seconds": clip.pinned ? 0 : max(0, now.timeIntervalSince(clip.copiedAt)),
+                 "pinned": clip.pinned,
+                 "hint": clip.hint] as [String: Any]
+            }]
+    }
     private let queue = DispatchQueue(label: "JevClipboard.model")
     private var process: Process?
     private var input: FileHandle?
@@ -113,17 +132,7 @@ final class ModelWorker {
                 guard self.process?.isRunning == true, let input = self.input else {
                     throw ClipboardError.message("Jev is unavailable. Restart it from the menu.")
                 }
-                let payload: [String: Any] = ["context": context,
-                    "items": clips.enumerated().map { index, clip in
-                        ["id": clip.id,
-                         "text": CandidateText.forClip(clip, candidateCount: clips.count),
-                         "app": String(clip.app.prefix(200)),
-                         "kind": clip.kind.rawValue,
-                         "recency_rank": index,
-                         "age_seconds": clip.pinned ? 0 : max(0, Date().timeIntervalSince(clip.copiedAt)),
-                         "pinned": clip.pinned,
-                         "hint": clip.hint] as [String: Any]
-                    }]
+                let payload = Self.requestPayload(context: context, clips: clips)
                 var data = try JSONSerialization.data(withJSONObject: payload)
                 data.append(10)
                 try input.write(contentsOf: data)
