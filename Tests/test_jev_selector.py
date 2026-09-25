@@ -1,11 +1,15 @@
 import copy
+import io
 import json
 from pathlib import Path
 import sys
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from jev_selector import make_request, result_for, JevSelector, SelectionError, MODEL, request_body, MAX_REQUEST_BYTES
+import jev_worker
 
 class JevTests(unittest.TestCase):
     def setUp(self):
@@ -241,5 +245,146 @@ class JevTests(unittest.TestCase):
         for _ in range(2):self.assertEqual(selector.rank(self.payload)['ranked'][0]['id'],'stable-url')
         self.assertEqual(c.calls,2)
         self.assertIs(selector.connection,c)
+
+    def test_warm_connection_uses_metadata_get_then_reuses_socket_for_selection(self):
+        request,_=make_request(self.payload)
+        answer=json.dumps(self.response(request,'C0')).encode()
+        calls=[]
+        class Connection:
+            status=200;will_close=False
+            def request(self,method,path,body=None,headers=None):
+                calls.append((method,path,body,headers))
+                self.path=path
+            def getresponse(self):return self
+            def read(self,n):return b'{"models":[]}' if self.path=='/v1/models' else answer
+            def close(self):pass
+        connection=Connection()
+        selector=JevSelector('test-secret-not-a-real-key',lambda:connection)
+        self.assertTrue(selector.warm_connection())
+        self.assertIs(selector.connection,connection)
+        self.assertEqual(selector.rank(self.payload)['ranked'][0]['id'],'stable-url')
+        self.assertEqual([(method,path) for method,path,_,_ in calls],
+                         [('GET','/v1/models'),('POST','/v1/systemone')])
+        self.assertIsNone(calls[0][2])
+        self.assertEqual(calls[0][3]['Authorization'],'Bearer test-secret-not-a-real-key')
+
+    def test_warm_connection_replaces_a_stale_idle_socket(self):
+        calls=[]
+        class Connection:
+            status=200;will_close=False
+            def __init__(self):self.closed=False
+            def request(self,method,path,body=None,headers=None):
+                calls.append((self,method,path))
+            def getresponse(self):return self
+            def read(self,n):return b'{"models":[]}'
+            def close(self):self.closed=True
+        first,second=Connection(),Connection()
+        selector=JevSelector('test-secret-not-a-real-key',lambda:second)
+        selector.connection=first
+        self.assertTrue(selector.warm_connection())
+        self.assertIs(selector.connection,second)
+        self.assertTrue(first.closed)
+        self.assertEqual([(method,path) for _,method,path in calls],
+                         [('GET','/v1/models')])
+
+    def test_background_warm_does_not_block_selection(self):
+        request,_=make_request(self.payload)
+        answer=json.dumps(self.response(request,'C0')).encode()
+        started=threading.Event()
+        finish=threading.Event()
+        class ExistingConnection:
+            status=200;will_close=False
+            def request(self,*args,**kwargs):pass
+            def getresponse(self):return self
+            def read(self,n):return answer
+            def close(self):pass
+        class WarmConnection:
+            status=200;will_close=False
+            def request(self,*args,**kwargs):
+                started.set()
+                finish.wait(2)
+            def getresponse(self):return self
+            def read(self,n):return b'{"models":[]}'
+            def close(self):pass
+        selector=JevSelector('test-secret-not-a-real-key',lambda:WarmConnection())
+        selector.connection=ExistingConnection()
+        warm_thread=selector.warm_connection_async()
+        self.assertTrue(started.wait(1))
+        self.assertIsNone(selector.warm_connection_async(), 'Only one refresh may be in flight')
+        result=[]
+        select_thread=threading.Thread(target=lambda:result.append(selector.rank(self.payload)))
+        select_thread.start()
+        select_thread.join(1)
+        try:
+            self.assertFalse(select_thread.is_alive(), 'Refresh blocked a Smart Paste selection')
+            self.assertEqual(result[0]['ranked'][0]['id'],'stable-url')
+        finally:
+            finish.set()
+            warm_thread.join(2)
+
+    def test_warm_failure_does_not_block_later_selection(self):
+        request,_=make_request(self.payload)
+        answer=json.dumps(self.response(request,'C0')).encode()
+        class FailedConnection:
+            def request(self,*args,**kwargs):raise OSError('offline')
+            def close(self):pass
+        class GoodConnection:
+            status=200;will_close=False
+            def request(self,*args,**kwargs):pass
+            def getresponse(self):return self
+            def read(self,n):return answer
+            def close(self):pass
+        connections=iter([FailedConnection(),GoodConnection()])
+        selector=JevSelector('test-secret-not-a-real-key',lambda:next(connections))
+        self.assertFalse(selector.warm_connection())
+        self.assertIsNone(selector.connection)
+        self.assertEqual(selector.rank(self.payload)['ranked'][0]['id'],'stable-url')
+
+    def test_warm_http_error_preserves_existing_connection(self):
+        class Connection:
+            status=401;will_close=False
+            def __init__(self):self.closed=False;self.calls=0
+            def request(self,*args,**kwargs):self.calls+=1
+            def getresponse(self):return self
+            def read(self,n):return b''
+            def close(self):self.closed=True
+        prior,failed=Connection(),Connection()
+        selector=JevSelector('test-secret-not-a-real-key',lambda:failed)
+        selector.connection=prior
+        self.assertFalse(selector.warm_connection())
+        self.assertIs(selector.connection,prior)
+        self.assertFalse(prior.closed)
+        self.assertTrue(failed.closed)
+        self.assertEqual(failed.calls,1)
+
+    def test_worker_warms_on_startup_and_local_health_ping(self):
+        events=[]
+        class Selector:
+            def __init__(self,key,recorder):events.append('setup')
+            def warm_connection(self):events.append('warm');return True
+            def warm_connection_async(self):events.append('warm_async')
+            def close(self):events.append('close')
+        input_data=io.BytesIO(b'{"api_key":"test-secret-not-a-real-key"}\n{"ping":true}\n')
+        replies=[]
+        with patch.object(jev_worker,'JevSelector',Selector), \
+             patch.object(jev_worker,'RequestDataset',lambda:None), \
+             patch.object(jev_worker,'emit',replies.append), \
+             patch.object(jev_worker.sys,'stdin',SimpleNamespace(buffer=input_data)):
+            jev_worker.main()
+        self.assertEqual(events,['setup','warm','warm_async','close'])
+        self.assertEqual(replies,[{'type':'ready'},{'type':'ready'}])
+
+    def test_worker_remains_ready_when_startup_warm_fails(self):
+        class Selector:
+            def __init__(self,key,recorder):pass
+            def warm_connection(self):return False
+            def close(self):pass
+        replies=[]
+        with patch.object(jev_worker,'JevSelector',Selector), \
+             patch.object(jev_worker,'RequestDataset',lambda:None), \
+             patch.object(jev_worker,'emit',replies.append), \
+             patch.object(jev_worker.sys,'stdin',SimpleNamespace(buffer=io.BytesIO(b'{"api_key":"test-secret-not-a-real-key"}\n'))):
+            jev_worker.main()
+        self.assertEqual(replies,[{'type':'ready'}])
 
 if __name__=='__main__':unittest.main()

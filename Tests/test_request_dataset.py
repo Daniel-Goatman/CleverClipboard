@@ -140,9 +140,12 @@ class DatasetTests(unittest.TestCase):
         code = '''
 import io, sys
 import jev_worker
+from jev_selector import JevSelector
 from request_dataset import RequestDataset
 root = sys.argv[1]
 jev_worker.RequestDataset = lambda: RequestDataset(root)
+JevSelector.warm_connection = lambda self: False
+JevSelector.warm_connection_async = lambda self: None
 sys.stdin = io.TextIOWrapper(io.BytesIO(b'{"api_key":"synthetic-test-key-not-real"}\\n{"ping":true}\\n'))
 jev_worker.main()
 '''

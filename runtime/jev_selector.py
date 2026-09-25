@@ -4,6 +4,7 @@ import json
 import math
 import re
 import ssl
+import threading
 import time
 from destination_context import hierarchical_destination
 from request_dataset import DatasetError, contains_secret
@@ -210,14 +211,70 @@ class JevSelector:
         self.key = key
         self.connection_factory = connection_factory or (lambda: http.client.HTTPSConnection(HOST, timeout=8, context=ssl.create_default_context()))
         self.connection = None
+        self.connection_lock = threading.RLock()
+        self.warm_lock = threading.Lock()
         self.recorder = recorder
 
     def close(self):
-        if self.connection:
-            self.connection.close()
-        self.connection = None
+        with self.connection_lock:
+            if self.connection:
+                self.connection.close()
+            self.connection = None
+
+    def _warm_connection_locked(self):
+        # A separate connection avoids delaying a selection already using the
+        # current socket. Only a successful, reusable response replaces it.
+        candidate = None
+        try:
+            candidate = self.connection_factory()
+            candidate.request('GET', '/v1/models', headers={'Authorization':'Bearer '+self.key})
+            response = candidate.getresponse()
+            data = response.read(128001)
+            if response.status != 200 or len(data) > 128000 or response.will_close:
+                return False
+            with self.connection_lock:
+                previous = self.connection
+                self.connection = candidate
+                candidate = None
+            if previous:
+                try:
+                    previous.close()
+                except Exception:
+                    pass
+            return True
+        except Exception:
+            # Warming is best effort. A real selection keeps its normal error path.
+            return False
+        finally:
+            try:
+                if candidate:
+                    candidate.close()
+            except Exception:
+                pass
+            finally:
+                self.warm_lock.release()
+
+    def warm_connection(self):
+        if not self.warm_lock.acquire(blocking=False):
+            return False
+        return self._warm_connection_locked()
+
+    def warm_connection_async(self):
+        if not self.warm_lock.acquire(blocking=False):
+            return None
+        thread = threading.Thread(target=self._warm_connection_locked, daemon=True)
+        try:
+            thread.start()
+        except Exception:
+            self.warm_lock.release()
+            return None
+        return thread
 
     def rank(self, payload):
+        with self.connection_lock:
+            return self._rank(payload)
+
+    def _rank(self, payload):
         start = time.perf_counter()
         request, ids = make_request(payload)
         body = request_body(request)

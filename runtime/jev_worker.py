@@ -16,6 +16,7 @@ def main():
         setup = json.loads(raw)
         selector = JevSelector(setup.pop('api_key',None), recorder=RequestDataset())
         raw = b''; setup = None
+        selector.warm_connection()
         emit({'type':'ready'})
         while True:
             raw = sys.stdin.buffer.readline(512001)
@@ -27,8 +28,13 @@ def main():
                 payload = json.loads(raw)
                 if not isinstance(payload,dict):
                     raise SelectionError('Invalid selection request.')
-                # Local IPC health check; never a paid keepalive inference.
-                result = {'type':'ready'} if payload.get('ping') is True else selector.rank(payload)
+                # Refresh the documented metadata endpoint off the selection path.
+                # The local ping never makes a paid inference.
+                if payload.get('ping') is True:
+                    selector.warm_connection_async()
+                    result = {'type':'ready'}
+                else:
+                    result = selector.rank(payload)
                 emit(result)
             except SelectionError as error:
                 emit({'type':'error','error':str(error)})
