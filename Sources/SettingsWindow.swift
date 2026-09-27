@@ -7,6 +7,14 @@ final class SettingsModel: ObservableObject {
     @Published var accessibilityAllowed = false
     @Published var screenRecordingAllowed = false
     @Published var shortcutRegistered = true
+    static func permissionMenuItem(_ name: String, allowed: Bool, symbol: String, action: Selector, target: AnyObject?) -> NSMenuItem {
+        let item = NSMenuItem(title: allowed ? "\(name): Granted" : "Allow \(name)…", action: action, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: allowed ? "checkmark.circle" : symbol, accessibilityDescription: nil)
+        item.toolTip = "Manage \(name) permission in System Settings"
+        item.target = target
+        return item
+    }
+
     var onRefresh: () -> Void = {}
     var onReconnect: () -> Void = {}
     var onKey: () -> Void = {}
@@ -73,6 +81,7 @@ struct SettingsView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.frame(minWidth: 740, minHeight: 580).carbonRoot()
             .onAppear(perform: model.onRefresh)
+            .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in model.onRefresh() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.onRefresh() }
     }
     private var subtitle: String {

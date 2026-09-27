@@ -77,10 +77,18 @@ final class JevClient {
         return task
     }
 
-    func select(context: String, clips: [Clip], completion: @escaping (Result<SelectionReply, Error>) -> Void) {
+    func select(context: String, clips: [Clip], dataset: SmartPasteDataset? = nil, completion: @escaping (Result<SelectionReply, Error>) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
-            func complete(_ value: Result<SelectionReply, Error>) { DispatchQueue.main.async { completion(value) } }
+            func complete(_ value: Result<SelectionReply, Error>) {
+                var outcome = value
+                if case .failure(let error) = value {
+                    do { try dataset?.append("inference_failed", ["reason": PasteReason.classify(error.localizedDescription).rawValue]) }
+                    catch { outcome = .failure(error) }
+                }
+                let final = outcome
+                DispatchQueue.main.async { completion(final) }
+            }
             guard !self.busy else {
                 complete(.failure(ClipboardError.message("Jev is finishing the previous selection. Try again in a moment."))); return
             }
@@ -106,6 +114,9 @@ final class JevClient {
                 #if CUEKIT_DEVELOPMENT
                 let record = try DevelopmentDataset.begin(request: prepared.body, ids: prepared.ids)
                 #endif
+                try dataset?.append("request", ["request": prepared.body,
+                    "candidate_id_map": Dictionary(uniqueKeysWithValues: prepared.ids.enumerated().map { ("C\($0.offset)", $0.element) }),
+                    "transport_status": "prepared_send_not_confirmed"])
                 self.busy = true
                 self.task = self.session.dataTask(with: request) { [weak self] data, response, error in
                     guard let self else { return }
@@ -123,6 +134,9 @@ final class JevClient {
                             #if CUEKIT_DEVELOPMENT
                             try record?.finish(response: parsed, result: result, error: nil)
                             #endif
+                            let selection = try JSONSerialization.jsonObject(with: JSONEncoder().encode(result))
+                            try dataset?.append("response", ["response": parsed, "selection_result": selection,
+                                "paste_outcome": "not_observed", "label_status": "unlabelled"])
                             complete(.success(result))
                         } catch {
                             if let response = response as? HTTPURLResponse, [401,403].contains(response.statusCode) {

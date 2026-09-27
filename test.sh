@@ -18,6 +18,8 @@ client=("${core[@]}" Sources/JevCredential.swift Sources/JevClient.swift Sources
 "${swift[@]}" Sources/Diagnostics.swift Sources/Context.swift Tests/ContextTests.swift -o .build/context-tests
 .build/context-tests
 python3 -m unittest discover -s Tests -p 'test_*.py' -v
+"${swift[@]}" Sources/Diagnostics.swift Sources/CarbonTheme.swift Sources/SmartPasteErrorWindow.swift Tests/SmartPasteErrorTests.swift -o .build/smart-paste-error-tests
+.build/smart-paste-error-tests
 "${swift[@]}" Sources/Diagnostics.swift Tests/DiagnosticsTests.swift -o .build/diagnostics-tests
 .build/diagnostics-tests
 "${swift[@]}" Sources/History.swift Sources/CandidateText.swift Tests/CandidateTextTests.swift -o .build/candidate-tests
@@ -39,6 +41,9 @@ python3 -m unittest discover -s Tests -p 'test_*.py' -v
 python3 scripts/check_native_request.py
 python3 scripts/check_combined_context.py
 if [[ "$interactive" == true ]]; then
+    "${swift[@]}" Sources/AppBrand.swift Sources/CarbonTheme.swift Sources/SettingsWindow.swift Tests/PermissionPresentationTests.swift -o .build/permission-presentation-tests
+    .build/permission-presentation-tests output/permission-fix
+    .build/smart-paste-error-tests --render output/permission-fix/errors
     "${swift[@]}" Sources/PasteKeyboard.swift Tests/PasteKeyboardTests.swift -o .build/keyboard-tests
     .build/keyboard-tests
     "${swift[@]}" Sources/History.swift Sources/ClipboardStore.swift Sources/ImageOCR.swift Sources/PasteboardPayload.swift Tests/AssetPasteboardTests.swift -o .build/asset-pasteboard-tests

@@ -26,3 +26,6 @@ Images/
 SavedAssets/
 *.request.json
 *.result.json
+
+*.attempt.jsonl
+*.label.json

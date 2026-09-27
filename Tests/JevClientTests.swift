@@ -54,6 +54,8 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("cuekit-client-tests-\(UUID().uuidString)")
         setenv("CUEKIT_DATASET_ROOT", output.path, 1)
         defer { unsetenv("CUEKIT_DATASET_ROOT"); try? FileManager.default.removeItem(at: output) }
+        let attempts = output.appendingPathExtension("attempts")
+        defer { try? FileManager.default.removeItem(at: attempts) }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockJevProtocol.self]
         let session = URLSession(configuration: config)
@@ -84,7 +86,8 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
                      Clip(id:"email",text:"email@example.org",app:"Fixture",copiedAt:.now,hint:"My email address",pinned:true)]
         func select(_ input: [Clip]? = nil) -> Result<SelectionReply, Error> {
             var response: Result<SelectionReply, Error>?
-            client.select(context: "My phone number:", clips: input ?? clips) {
+            let dataset = try! SmartPasteDataset(root: attempts)
+            client.select(context: "My phone number:", clips: input ?? clips, dataset: dataset) {
                 precondition(Thread.isMainThread); response = $0
             }
             wait { response != nil }; return response!
@@ -106,6 +109,13 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
         let hiddenSecret = Clip(id:"hidden", text:String(repeating: "x", count: 5000) + "synthetic-test-key-not-real" + String(repeating: "x", count: 5000), app:"Fixture", copiedAt:.now)
         if case .success = select([hiddenSecret]) { fatalError("Credential hidden by excerpting was accepted") }
         precondition(MockJevProtocol.postCount == before)
+        let brokenDataset = try SmartPasteDataset(root: attempts)
+        do { try brokenDataset.append("invalid", ["value": Double.infinity]); fatalError("Expected storage failure") } catch { }
+        var blockedResult: Result<SelectionReply, Error>?
+        client.select(context: "Fixture", clips: clips, dataset: brokenDataset) { blockedResult = $0 }
+        wait { blockedResult != nil }
+        if case .success = blockedResult! { fatalError("Unrecorded inference was allowed") }
+        precondition(MockJevProtocol.postCount == before, "Storage failure must prevent HTTP dispatch")
         MockJevProtocol.configure(delay: 0.5)
         var staleCallback = false
         client.select(context: "Fixture", clips: clips) { _ in staleCallback = true }
@@ -115,6 +125,24 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
         let until = Date().addingTimeInterval(0.6)
         while Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
         precondition(!staleCallback, "Cancelled generation must not deliver a stale selection")
+        let attemptFiles = try FileManager.default.contentsOfDirectory(at: attempts, includingPropertiesForKeys: nil)
+        precondition(attemptFiles.count == 8)
+        var requests = 0, responses = 0, failures = 0
+        for file in attemptFiles {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            precondition(!text.contains("synthetic-test-key-not-real") && !text.contains("Authorization"))
+            let rows = try text.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+            precondition(rows.first?["event"] as? String == "attempt")
+            requests += rows.filter { $0["event"] as? String == "request" }.count
+            responses += rows.filter { $0["event"] as? String == "response" }.count
+            failures += rows.filter { $0["event"] as? String == "inference_failed" }.count
+            for row in rows where row["event"] as? String == "request" {
+                let data = row["data"] as! [String: Any]
+                precondition(data["request"] is [String: Any] && data["candidate_id_map"] is [String: String])
+            }
+        }
+        precondition(requests == 5 && responses == 3 && failures == 4)
+        print("PASS: durable request/response journals; fallback and failures; configured secret rejected before persistence")
         #if CUEKIT_DEVELOPMENT
         let records = try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil)
         precondition(!records.isEmpty)

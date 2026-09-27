@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var historyWindow: NSWindow?
     private var keyWindow: TypeSafeKeyWindow?
     private var settingsWindow: NSWindow?
+    private var smartPasteErrorWindow: SmartPasteErrorWindow?
     private let settingsModel = SettingsModel()
     private var lastChange = NSPasteboard.general.changeCount
     private var lastClipboardPollUptime = ProcessInfo.processInfo.systemUptime
@@ -325,9 +326,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func smartPaste() {
-        guard !selecting else { trace?.record(.busy); return }
-        let trace = PasteTrace(); self.trace = trace
+        let dataset: SmartPasteDataset?
+        do { dataset = fixture ? nil : try SmartPasteDataset() }
+        catch { showError(error.localizedDescription); return }
+        let trace = PasteTrace(dataset: dataset)
         trace.record(.accepted, count: history.items.count)
+        if selecting {
+            trace.record(.failed, reason: .worker_busy)
+            do { try trace.checkRecording() } catch { showError(error.localizedDescription) }
+            return
+        }
+        smartPasteErrorWindow?.dismiss()
+        self.trace = trace
+        do { try trace.checkRecording() } catch { showError(error.localizedDescription); return }
         pollClipboard()
         guard ready else { showError(status, reason: .worker_unavailable); return }
         let started = Date(); requestStarted = started
@@ -363,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     guard self.requestID == id else { return }
                     try self.validateTarget(target)
                     trace.record(.ranking_started, count: items.count)
-                    self.client.select(context: context.text, clips: items) { [weak self] result in
+                    self.client.select(context: context.text, clips: items, dataset: trace.dataset) { [weak self] result in
                         guard let self, self.requestID == id else { return }
                         switch result {
                         case .success(let reply):
@@ -418,6 +429,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard let events = PasteKeyboard.events() else {
             self.showError("macOS could not create a paste event."); return
         }
+        self.trace?.record(.paste_prepared)
+        do { try self.trace?.checkRecording() }
+        catch { self.showError(error.localizedDescription); return }
         let pb = NSPasteboard.general
         if useLatestClipboard, let text = PasteboardPayload.plainTextForLatest(pb) {
             guard PasteboardPayload(content: .text(text)).write(to: pb) else {
@@ -438,6 +452,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // The lease proves fallback uses the invocation clipboard. Text is
         // normalized to plain text; image and file representations stay intact.
         if useLatestClipboard { self.trace?.record(.latest_clipboard) }
+        do { try self.trace?.checkRecording() }
+        catch { self.showError(error.localizedDescription); return }
         self.requestID = UUID(); self.selecting = false; self.target = nil; self.lease = nil
         self.operationStatus = useLatestClipboard ? "Latest clipboard → \(target.appName)" : "Jev match → \(target.appName)"
         let totalMilliseconds = Date().timeIntervalSince(self.requestStarted) * 1000
@@ -449,29 +465,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // Address the verified PID so an app switch cannot redirect the paste elsewhere.
         for event in events { event.postToPid(target.pid) }
         self.trace?.record(.paste_posted)
+        do { try self.trace?.checkRecording() }
+        catch {
+            operationStatus = "Paste events were sent, but the dataset outcome could not be saved. Check available disk space."
+            updateIcon(); refreshHistoryModel()
+            if smartPasteErrorWindow == nil { smartPasteErrorWindow = SmartPasteErrorWindow() }
+            let failure = SmartPasteFailure(message: operationStatus!, reason: .native_error)
+            smartPasteErrorWindow?.show(failure) { _ in }
+        }
     }
 
     private func validateTarget(_ target: InputTarget) throws {
         trace?.record(.validation_started)
+        try trace?.checkRecording()
         try target.validateCurrent()
         trace?.record(.validation_ready)
+        try trace?.checkRecording()
     }
 
     private func cancel() {
+        smartPasteErrorWindow?.dismiss()
         trace?.record(.cancelled, reason: .user_cancelled)
         let wasSelecting = selecting
         requestID = UUID(); selecting = false; target = nil; lease = nil
         stopPulse()
-        if wasSelecting { operationStatus = "Selection cancelled" }
+        if wasSelecting {
+            operationStatus = "Selection cancelled"
+            do { try trace?.checkRecording() }
+            catch {
+                operationStatus = error.localizedDescription
+                if smartPasteErrorWindow == nil { smartPasteErrorWindow = SmartPasteErrorWindow() }
+                smartPasteErrorWindow?.show(SmartPasteFailure(message: error.localizedDescription, reason: .native_error)) { _ in }
+                updateIcon(); refreshHistoryModel()
+            }
+        }
         rebuildMenu()
     }
 
-    private func showError(_ message: String, reason: PasteReason? = nil, errorCode: Int = 0) {
-        trace?.record(.failed, reason: reason ?? PasteReason.classify(message), errorCode: errorCode)
+    private func showError(_ suppliedMessage: String, reason: PasteReason? = nil, errorCode: Int = 0) {
+        var message = suppliedMessage
+        var failureReason = reason ?? PasteReason.classify(message)
+        trace?.record(.failed, reason: failureReason, errorCode: errorCode)
         cancel()
+        do { try trace?.checkRecording() }
+        catch { message = error.localizedDescription; failureReason = .native_error }
         operationStatus = message
         statusItem.button?.toolTip = message
         startPulse(); finishPulse(); rebuildMenu()
+        refreshHistoryModel()
+        if smartPasteErrorWindow == nil { smartPasteErrorWindow = SmartPasteErrorWindow() }
+        let failure = SmartPasteFailure(message: message, reason: failureReason,
+                                        accessibilityAllowed: settingsModel.accessibilityAllowed,
+                                        screenRecordingAllowed: settingsModel.screenRecordingAllowed)
+        smartPasteErrorWindow?.show(failure) { [weak self] recovery in
+            guard let self else { return }
+            switch recovery {
+            case .accessibility: self.settingsModel.onAccessibility()
+            case .screenRecording: self.settingsModel.onScreenRecording()
+            case .settings: self.openSettingsWindow()
+            }
+        }
     }
 
     private func updateIcon() {
@@ -526,8 +579,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         add(menu, "Settings…", #selector(openSettingsWindow), symbol: "gearshape")
         add(menu, "TypeSafe API Key…", #selector(configureJev), symbol: "key")
         add(menu, "Reconnect TypeSafe", #selector(restart), symbol: "arrow.clockwise")
-        add(menu, "Allow Accessibility…", #selector(accessibility), symbol: "accessibility")
-        add(menu, "Allow Screen Recording…", #selector(screenPermission), symbol: "rectangle.inset.filled.and.person.filled")
+        menu.addItem(SettingsModel.permissionMenuItem("Accessibility", allowed: settingsModel.accessibilityAllowed, symbol: "accessibility", action: #selector(accessibility), target: self))
+        menu.addItem(SettingsModel.permissionMenuItem("Screen Recording", allowed: settingsModel.screenRecordingAllowed, symbol: "rectangle.inset.filled.and.person.filled", action: #selector(screenPermission), target: self))
         menu.addItem(.separator())
         add(menu, "Quit \(AppBrand.name)", #selector(quit), symbol: "power")
         statusItem.menu = menu
@@ -756,9 +809,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func restart() { cancel(); ready = false; client?.start() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func accessibility() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        if AXIsProcessTrusted() { settingsModel.onAccessibility() }
+        else { _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) }
+        refreshSettingsModel()
     }
-    @objc private func screenPermission() { CGRequestScreenCaptureAccess() }
+    @objc private func screenPermission() {
+        if CGPreflightScreenCaptureAccess() { settingsModel.onScreenRecording() }
+        else { CGRequestScreenCaptureAccess() }
+        refreshSettingsModel()
+    }
 }
 
 @main struct LayaClipboardMain {

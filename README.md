@@ -6,7 +6,7 @@ Local macOS menu-bar clipboard manager and Smart Paste selector. ⌘⇧V capture
 
 1. Put **Cuekit.app** in Applications and open it. It lives in the menu bar.
 2. Choose **TypeSafe API Key…** in Cuekit’s menu, enter your key in the masked field, then click **Verify & Save**. Cuekit checks it with TypeSafe and saves it in macOS Keychain only after successful verification. Invalid keys show an inline error; failed verification leaves your existing key unchanged. Collection pauses while this window is open, and an exact saved-key copy is removed from history without clearing unrelated entries.
-3. Choose **Allow Accessibility…** and grant Cuekit access in System Settings. This is required for Smart Paste. Screen Recording is optional; it supplies local OCR when accessible context is insufficient.
+3. If the menu does not show **Accessibility: Granted**, choose **Allow Accessibility…** and grant Cuekit access in System Settings. This is required for Smart Paste. Screen Recording is optional; it supplies local OCR when accessible context is insufficient.
 4. Copy a few items, click a destination in another app, then press **⌘⇧V**. Jev chooses an existing item; **⌘V** still pastes normally. Use **Open Clipboard…** to inspect history and **Always Available** for saved entries.
 
 You need your own TypeSafe account/key and internet connection. Hosted selections may incur API charges. The installed app needs no Python, package manager, or local model. This repository currently produces a locally signed prototype, not a notarized downloadable release; build it below if you do not already have an app bundle.
@@ -56,7 +56,9 @@ Ordinary history is limited to 50 items and 128 MB total; text is capped at 256 
 
 If the library cannot be read (including an unsupported version), Cuekit preserves existing files and disables saving instead of overwriting the library or deleting assets. Restore `Library.json` from a backup and restart. History from the previous memory-only app cannot be migrated.
 
-Normal builds do not collect evaluation datasets or emit evaluation timing logs. Development builds can opt into local request/response recording; see [DATASET.md](DATASET.md). Existing development records are retained until separately removed; Clear History does not delete them. Content-free launch diagnostics remain at `results/jev-app/launch-status.json` in a source checkout, or under the app’s Application Support directory for an installed copy. They report readiness and permissions, not clipboard text.
+Every Smart Paste attempt is saved locally to `~/Library/Application Support/Jev Clipboard/SmartPasteDataset/` for training-data preparation, including early failures, busy attempts and cancellations. Records include the exact credential-screened model request and valid response when inference occurs, plus stage/outcome metadata. They contain private clipboard excerpts and destination text, use account-only permissions, are not app-level encrypted, and remain until explicitly removed; Clear History does not delete them. No dataset upload is implemented. See [DATASET.md](DATASET.md) for schema, exclusions and correction labels. A dispatched paste or model response is not a correctness label. Storage failures block the attempt before inference/paste; a final write failure after dispatch is reported as incomplete recording.
+
+Content-free stage/reason logs remain in the macOS unified log (subsystem `local.daniel.LayaClipboard`, category `diagnostics`). Launch diagnostics remain at `results/jev-app/launch-status.json` in a checkout or under Application Support for installed copies.
 
 ## Selection and tests
 

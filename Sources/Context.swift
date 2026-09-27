@@ -75,7 +75,7 @@ struct InputTarget {
             throw ClipboardError.message("Smart paste is disabled while secure keyboard input is active.")
         }
         guard AXIsProcessTrusted() else {
-            throw ClipboardError.message("Allow Accessibility in System Settings, then try again.")
+            throw ClipboardError.message("Accessibility was unavailable for this attempt. Check permissions in Settings, then try again.")
         }
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
@@ -152,8 +152,11 @@ struct InputTarget {
     }
 
     func validateCurrent() throws {
-        guard !IsSecureEventInputEnabled(), AXIsProcessTrusted() else {
-            throw ClipboardError.message("Accessibility is unavailable or secure keyboard input is active.")
+        guard !IsSecureEventInputEnabled() else {
+            throw ClipboardError.message("Smart paste is disabled while secure keyboard input is active.")
+        }
+        guard AXIsProcessTrusted() else {
+            throw ClipboardError.message("Accessibility was unavailable for this attempt. Check permissions in Settings, then try again.")
         }
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
             throw ClipboardError.message("Active app changed. Select the destination and try again.")
