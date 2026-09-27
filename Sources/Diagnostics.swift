@@ -9,7 +9,7 @@ enum PasteStage: String {
 }
 
 enum PasteReason: String {
-    case none, user_cancelled, paused, worker_unavailable, empty_history, accessibility, secure_input
+    case none, user_cancelled, worker_unavailable, empty_history, accessibility, secure_input
     case screen_recording, shutdown, no_input, not_editable, window_unidentified, app_changed, window_changed, input_changed
     case text_or_cursor_changed, clipboard_changed, lease_invalid, no_match, modifiers_held
     case event_creation, clipboard_write, worker_busy, worker_timeout, worker_error, native_error
@@ -17,7 +17,6 @@ enum PasteReason: String {
     // Exact allowlist: unknown/native errors are never copied into diagnostics.
     static func classify(_ message: String) -> PasteReason {
         switch message {
-        case "Clipboard collection is paused. Resume it from the menu.": return .paused
         case "Copy some text first. Laya remembers new copies while running.": return .empty_history
         case "Allow Accessibility in System Settings, then try again.": return .accessibility
         case "Allow Screen Recording in System Settings to use window context.": return .screen_recording
@@ -36,9 +35,9 @@ enum PasteReason: String {
         case "Release the shortcut keys and try again.": return .modifiers_held
         case "macOS could not create a paste event.": return .event_creation
         case "Could not prepare the clipboard.": return .clipboard_write
-        case "Laya is finishing the previous selection. Try again in a moment.": return .worker_busy
-        case "Laya timed out. Try again after it restarts.": return .worker_timeout
-        case "Laya is unavailable. Restart it from the menu.", "Model worker exited.", "Model pipe closed.", "Model pipe failed.", "Invalid model response.": return .worker_error
+        case "Jev is finishing the previous selection. Try again in a moment.": return .worker_busy
+        case "Jev timed out. Try again after it restarts.": return .worker_timeout
+        case "Jev is unavailable. Restart it from the menu.", "Model worker exited.", "Model pipe closed.", "Model pipe failed.", "Invalid model response.": return .worker_error
         default: return .native_error
         }
     }
@@ -54,7 +53,9 @@ final class PasteTrace: @unchecked Sendable {
     private let sink: (String) -> Void
 
     init(sink: @escaping (String) -> Void = { line in
+        #if CUEKIT_DEVELOPMENT
         Logger(subsystem: "local.daniel.LayaClipboard", category: "diagnostics").notice("\(line, privacy: .public)")
+        #endif
     }) { self.sink = sink }
 
     func record(_ event: PasteStage, reason: PasteReason = .none,

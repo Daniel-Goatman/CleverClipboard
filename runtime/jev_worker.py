@@ -1,5 +1,6 @@
-"""Private pipe protocol; key arrives in first message, never argv/env/disk."""
+"""Development-only legacy pipe harness. Production uses the native Swift client."""
 import json
+import os
 import sys
 from jev_selector import JevSelector, SelectionError
 from request_dataset import RequestDataset
@@ -14,7 +15,7 @@ def main():
         if len(raw)>4096 or not raw.endswith(b'\n'):
             raise SelectionError('Invalid Jev credential setup.')
         setup = json.loads(raw)
-        selector = JevSelector(setup.pop('api_key',None), recorder=RequestDataset())
+        selector = JevSelector(setup.pop('api_key',None), recorder=RequestDataset() if os.environ.get('CUEKIT_DATASET_ROOT') else None)
         raw = b''; setup = None
         selector.warm_connection()
         emit({'type':'ready'})

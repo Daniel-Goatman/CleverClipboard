@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private let store = ClipboardStore()
     private let historyModel = HistoryWindowModel()
     private var historyWindow: NSWindow?
+    private var keyWindow: TypeSafeKeyWindow?
+    private var settingsWindow: NSWindow?
+    private let settingsModel = SettingsModel()
     private var lastChange = NSPasteboard.general.changeCount
     private var lastClipboardPollUptime = ProcessInfo.processInfo.systemUptime
     private var copyForegroundGate = CopyForegroundGate()
@@ -17,12 +20,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var copyMonitor: Any?
     private var activationMonitor: NSObjectProtocol?
     private var clipboardAssetID: String?
-    private var paused = false
+    private let fileCaptureQueue = DispatchQueue(label: "cuekit.file-capture", qos: .utility)
+    private var fileCaptureTask: DispatchWorkItem?
+    private var fileCaptureGeneration = UUID()
     private var ready = false
-    private var status = "Starting Jev…"
-    private var workerStatus = "Starting Jev…"
+    private var status = "Starting TypeSafe…"
+    private var connectionStatus = "Starting TypeSafe…"
     private var statusItem: NSStatusItem!
-    private var worker: ModelWorker!
+    private var client: JevClient!
     private var timer: Timer?
     private var warmTimer: Timer?
     private var hotKey: EventHotKeyRef?
@@ -49,11 +54,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        if let icon = AppBrand.icon { NSApp.applicationIconImage = icon }
         installMainMenu()
         (history, pins) = store.load()
+        if let error = store.loadError {
+            operationStatus = error.localizedDescription
+        }
         configureHistoryModel()
+        configureSettingsModel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: "Jev Clipboard")
+        statusItem.button?.image = AppBrand.menuIcon
         rebuildMenu()
         registerShortcut()
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -89,12 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             DispatchQueue.main.async { self.statusItem.button?.performClick(nil) }
             return
         }
-        let root = Bundle.main.bundleURL.deletingLastPathComponent()
-        worker = ModelWorker(root: root)
-        worker.onState = { [weak self] message, isReady in
+        client = JevClient()
+        client.onState = { [weak self] message, isReady in
             guard let self else { return }
             self.ready = isReady
-            self.workerStatus = message
+            self.connectionStatus = message
             self.status = self.shortcutRegistered ? message : "⌘⇧V is in use. Use Smart Paste from the menu. · \(message)"
             self.rebuildMenu()
             if self.pulseTimer == nil { self.updateIcon() }
@@ -104,13 +114,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.verifyJev()
             }
         }
-        if ProcessInfo.processInfo.arguments.contains("--configure-jev-from-clipboard") {
-            configureJev()
-        } else { worker.start() }
+        client.start()
         timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in self?.pollClipboard() }
         warmTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.worker.keepWarm()
+            if !self.ready { self.client.start() }
         }
         if ProcessInfo.processInfo.arguments.contains("--show-history") {
             DispatchQueue.main.async { self.openHistoryWindow() }
@@ -123,10 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "bundle": Bundle.main.bundlePath, "worker_ready": ready,
             "shortcut_registered": shortcutRegistered,
             "accessibility": AXIsProcessTrusted(), "screen_capture": CGPreflightScreenCaptureAccess(),
-            "backend": "jev-1.13.0", "worker_status": workerStatus,
+            "backend": "jev-1.13.0", "worker_status": connectionStatus,
             "timestamp": Date().timeIntervalSince1970]
         if let smokePassed { data["synthetic_api_selection_passed"] = smokePassed }
-        let file = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("results/jev-app/launch-status.json")
+        let file = AppPaths.diagnostic("launch-status.json")
         if let encoded = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) {
             try? encoded.write(to: file, options: .atomic)
         }
@@ -135,10 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func verifyJev() {
         let samples = [Clip(id: "smoke-url", text: "https://example.org", app: "Fixture", copiedAt: Date()),
                        Clip(id: "smoke-email", text: "test@example.org", app: "Fixture", copiedAt: Date())]
-        worker.select(context: "App: Safari\nInput label: Website URL", clips: samples) { [weak self] result in
+        client.select(context: "App: Safari\nInput label: Website URL", clips: samples) { [weak self] result in
             guard let self else { return }
             let passed: Bool
-            if case .success(let reply) = result { passed = reply.ranked?.first?.id == "smoke-url" }
+            if case .success(let reply) = result { passed = reply.ranked.first?.id == "smoke-url" }
             else { passed = false }
             self.writeLaunchStatus(ready: self.ready, smokePassed: passed)
         }
@@ -146,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func applicationWillTerminate(_ notification: Notification) {
         trace?.record(.cancelled, reason: .shutdown)
-        worker?.stop()
+        client?.stop()
         if let hotKey { UnregisterEventHotKey(hotKey) }
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         if let localEscapeMonitor { NSEvent.removeMonitor(localEscapeMonitor) }
@@ -164,7 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard let event, let data else { return noErr }
             let app = Unmanaged<AppDelegate>.fromOpaque(data).takeUnretainedValue()
             let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+        #if CUEKIT_DEVELOPMENT
             Logger(subsystem: "local.daniel.LayaClipboard", category: "shortcut").notice("pressed=\(pressed, privacy: .public)")
+        #endif
             if pressed {
                 if app.shortcutLatch.press() {
                     app.watchShortcutRelease()
@@ -241,6 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func pollClipboard() {
         let pb = NSPasteboard.general
+        // Key entry may involve pasting a credential; do not collect while it is open.
+        guard keyWindow?.window?.isVisible != true else { lastChange = pb.changeCount; recentCopy = nil; return }
         let foreground = NSWorkspace.shared.frontmostApplication
         defer { copyForegroundGate.observePoll(pid: foreground?.processIdentifier) }
         guard pb.changeCount != lastChange else { return }
@@ -255,9 +267,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         clipboardProvenance = provenance
         recentCopy = nil
         clipboardAssetID = nil
+        cancelFileCapture()
         if selecting { showError("Clipboard changed. Press ⌘⇧V to try again.") }
-        guard !paused, !History.shouldIgnore(types: (pb.types ?? []).map(\.rawValue)) else { return }
+        guard store.loadError == nil, !History.shouldIgnore(types: (pb.types ?? []).map(\.rawValue)) else { return }
         let app = provenance.sourceApp ?? "Unknown source"
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            let token = fileCaptureGeneration
+            captureFiles(Array(urls.prefix(History.maximumCount)), app: app, provenance: provenance, at: Date(), token: token)
+            return
+        }
         if let kind = [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")].first(where: { pb.data(forType: $0) != nil }),
            let data = pb.data(forType: kind), data.count <= History.maximumItemBytes {
             let id = UUID().uuidString
@@ -281,11 +299,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let text = copiedText, history.add(text, app: app, provenance: provenance) { persistHistory() }
     }
 
+    private func cancelFileCapture() {
+        fileCaptureGeneration = UUID(); fileCaptureTask?.cancel(); fileCaptureTask = nil
+    }
+    private func captureFiles(_ urls: [URL], app: String, provenance: ClipProvenance, at: Date, token: UUID) {
+        guard let source = urls.first, token == fileCaptureGeneration, store.loadError == nil else { return }
+        let task = DispatchWorkItem { [weak self] in
+            let result = Result { try ClipboardStore.readFileSnapshot(from: source) }
+            DispatchQueue.main.async {
+                guard let self, token == self.fileCaptureGeneration, self.store.loadError == nil,
+                      self.keyWindow?.window?.isVisible != true else { return }
+                do {
+                    let clip = try self.store.writeHistoryFile(result.get(), app: app, at: at, provenance: provenance)
+                    _ = self.history.addFile(clip)
+                    self.operationStatus = nil
+                    self.persistHistory()
+                } catch {
+                    self.operationStatus = "Could not capture file. Use a regular file up to 20 MB."
+                    self.refreshHistoryModel(); self.rebuildMenu()
+                }
+                self.captureFiles(Array(urls.dropFirst()), app: app, provenance: provenance, at: at, token: token)
+            }
+        }
+        fileCaptureTask = task; fileCaptureQueue.async(execute: task)
+    }
+
     @objc func smartPaste() {
         guard !selecting else { trace?.record(.busy); return }
         let trace = PasteTrace(); self.trace = trace
         trace.record(.accepted, count: history.items.count)
-        guard !paused else { showError("Clipboard collection is paused. Resume it from the menu."); return }
         pollClipboard()
         guard ready else { showError(status, reason: .worker_unavailable); return }
         let started = Date(); requestStarted = started
@@ -293,11 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             trace.record(.snapshot_started)
             let target = try InputTarget.snapshot()
             trace.record(.snapshot_ready)
+        #if CUEKIT_DEVELOPMENT
             Logger(subsystem: "local.daniel.LayaClipboard", category: "context")
                 .notice("role=\(target.destinationRole, privacy: .public) caret_source=\(target.evidence.insertion?.source ?? "none", privacy: .public) ocr_needed=\(target.evidence.needsOCR, privacy: .public)")
+        #endif
+        #if CUEKIT_DEVELOPMENT
             let capability = InsertionContext.capabilitySummary(target.element)
             Logger(subsystem: "local.daniel.LayaClipboard", category: "context")
                 .notice("\(capability, privacy: .public) before_bytes=\(target.evidence.insertion?.before.utf8.count ?? 0, privacy: .public) after_bytes=\(target.evidence.insertion?.after.utf8.count ?? 0, privacy: .public)")
+        #endif
             self.target = target
             lease = PasteLease(clipboardVersion: NSPasteboard.general.changeCount, createdAt: Date())
             let id = trace.id; requestID = id; selecting = true
@@ -317,25 +363,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     guard self.requestID == id else { return }
                     try self.validateTarget(target)
                     trace.record(.ranking_started, count: items.count)
-                    self.worker.select(context: context.text, clips: items) { [weak self] result in
+                    self.client.select(context: context.text, clips: items) { [weak self] result in
                         guard let self, self.requestID == id else { return }
                         switch result {
                         case .success(let reply):
-                            trace.record(.ranking_ready, count: reply.eligible ?? reply.ranked?.count ?? 0,
-                                         modelMS: reply.elapsed_ms ?? -1, queueMS: reply.queue_ms ?? -1)
-                            let safeDecision = ["jev", "latest"].contains(reply.decision ?? "")
-                                ? reply.decision! : "unknown"
+                            trace.record(.ranking_ready, count: reply.eligible,
+                                         modelMS: reply.elapsed_ms ?? -1, queueMS: 0)
+        #if CUEKIT_DEVELOPMENT
+                            let safeDecision = ["jev", "latest"].contains(reply.decision)
+                                ? reply.decision : "unknown"
                             let originalIndex = items.firstIndex { $0.id == reply.model_choice } ?? -1
-                            let selectedIndex = items.firstIndex { $0.id == reply.ranked?.first?.id } ?? -1
+                            let selectedIndex = items.firstIndex { $0.id == reply.ranked.first?.id } ?? -1
                             Logger(subsystem: "local.daniel.LayaClipboard", category: "selection")
-                                .notice("decision=\(safeDecision, privacy: .public) role=\(target.destinationRole, privacy: .public) candidates=\(items.count, privacy: .public) model_index=\(originalIndex, privacy: .public) final_index=\(selectedIndex, privacy: .public) recency_changed=\(reply.recency_changed ?? false, privacy: .public) score=\(reply.ranked?.first?.score ?? -1, privacy: .public)")
+                                .notice("decision=\(safeDecision, privacy: .public) role=\(target.destinationRole, privacy: .public) candidates=\(items.count, privacy: .public) model_index=\(originalIndex, privacy: .public) final_index=\(selectedIndex, privacy: .public) confidence=\(reply.confidence, privacy: .public) score=\(reply.ranked.first?.score ?? -1, privacy: .public)")
+        #endif
                             do { try self.validateTarget(target) }
                             catch { self.showError(error.localizedDescription, errorCode: (error as NSError).code); return }
                             guard self.lease?.valid(clipboardVersion: NSPasteboard.general.changeCount) == true else {
                                 self.showError("Clipboard changed or selection timed out. Try again."); return
                             }
                             let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
-                            self.suggestions = (reply.ranked ?? []).compactMap { byID[$0.id] }
+                            self.suggestions = reply.ranked.compactMap { byID[$0.id] }
                             self.selected = self.suggestions.first
                             let total = Date().timeIntervalSince(started) * 1000
                             self.timing = String(format: "%.0f ms selection · %.0f ms capture · %.0f ms OCR · %.0f ms Jev API", total, context.captureMilliseconds, context.ocrMilliseconds, reply.elapsed_ms ?? 0)
@@ -387,14 +435,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.clipboardProvenance = .ownWrite(original: selected.provenance)
             self.clipboardAssetID = selected.assetID
         }
-        // Ordinary fallback leaves the system pasteboard (including rich formats)
-        // untouched. The lease above still proves it is the clipboard from invocation.
+        // The lease proves fallback uses the invocation clipboard. Text is
+        // normalized to plain text; image and file representations stay intact.
         if useLatestClipboard { self.trace?.record(.latest_clipboard) }
         self.requestID = UUID(); self.selecting = false; self.target = nil; self.lease = nil
         self.operationStatus = useLatestClipboard ? "Latest clipboard → \(target.appName)" : "Jev match → \(target.appName)"
         let totalMilliseconds = Date().timeIntervalSince(self.requestStarted) * 1000
         self.timing += String(format: " · %.0f ms to paste", totalMilliseconds)
+        #if CUEKIT_DEVELOPMENT
         Logger(subsystem: "local.daniel.LayaClipboard", category: "performance").info("smart_paste_ms=\(totalMilliseconds, privacy: .public)")
+        #endif
         self.rebuildMenu(); self.finishPulse()
         // Address the verified PID so an app switch cannot redirect the paste elsewhere.
         for event in events { event.postToPid(target.pid) }
@@ -425,9 +475,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func updateIcon() {
-        statusItem.button?.image = NSImage(systemSymbolName: ready ? "clipboard.fill" : "clipboard", accessibilityDescription: "Jev Clipboard")
+        statusItem.button?.image = AppBrand.menuIcon
         statusItem.button?.contentTintColor = nil
-        statusItem.button?.alphaValue = 1
+        statusItem.button?.alphaValue = ready ? 1 : 0.55
         statusItem.button?.toolTip = operationStatus ?? status
     }
 
@@ -460,36 +510,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func menuWillOpen(_ menu: NSMenu) { rebuildMenu() }
 
     private func rebuildMenu() {
+        refreshSettingsModel()
         let menu = statusItem.menu ?? NSMenu()
         menu.removeAllItems()
         menu.delegate = self
-        if !ready { menu.addItem(NSMenuItem(title: status, action: nil, keyEquivalent: "")) }
-        add(menu, "Open Clipboard…", #selector(openHistoryWindow))
-        add(menu, "Smart Paste  ⌘⇧V", #selector(menuSmartPaste))
-        if selecting { add(menu, "Cancel Selection", #selector(cancelSelection)) }
-        add(menu, paused ? "Resume Collection" : "Pause Collection", #selector(togglePause))
+        let connection = NSMenuItem(title: ready ? "TypeSafe connected" : "TypeSafe unavailable", action: nil, keyEquivalent: "")
+        connection.image = NSImage(systemSymbolName: ready ? "checkmark.circle" : "exclamationmark.circle", accessibilityDescription: nil)
+        connection.toolTip = status
+        menu.addItem(connection)
         menu.addItem(.separator())
-        let troubleshooting = NSMenuItem(title: "Troubleshooting", action: nil, keyEquivalent: "")
-        let tools = NSMenu()
-        tools.addItem(NSMenuItem(title: status, action: nil, keyEquivalent: ""))
-        if !timing.isEmpty { tools.addItem(NSMenuItem(title: timing, action: nil, keyEquivalent: "")) }
-        tools.addItem(.separator())
-        add(tools, "Allow Accessibility…", #selector(accessibility))
-        add(tools, "Allow Screen Recording…", #selector(screenPermission))
-        add(tools, "Set TypeSafe Key from Clipboard…", #selector(configureJev))
-        add(tools, "Restart Jev", #selector(restart))
-        troubleshooting.submenu = tools
-        menu.addItem(troubleshooting)
+        add(menu, "Open Clipboard…", #selector(openHistoryWindow), symbol: "list.clipboard")
+        add(menu, "Smart Paste  ⌘⇧V", #selector(menuSmartPaste), symbol: "sparkles")
+        if selecting { add(menu, "Cancel Selection", #selector(cancelSelection), symbol: "xmark.circle") }
         menu.addItem(.separator())
-        add(menu, "Quit Jev Clipboard", #selector(quit))
+        add(menu, "Settings…", #selector(openSettingsWindow), symbol: "gearshape")
+        add(menu, "TypeSafe API Key…", #selector(configureJev), symbol: "key")
+        add(menu, "Reconnect TypeSafe", #selector(restart), symbol: "arrow.clockwise")
+        add(menu, "Allow Accessibility…", #selector(accessibility), symbol: "accessibility")
+        add(menu, "Allow Screen Recording…", #selector(screenPermission), symbol: "rectangle.inset.filled.and.person.filled")
+        menu.addItem(.separator())
+        add(menu, "Quit \(AppBrand.name)", #selector(quit), symbol: "power")
         statusItem.menu = menu
     }
 
     private func installMainMenu() {
         let mainMenu = NSMenu()
-        let appItem = NSMenuItem(title: "Jev Clipboard", action: nil, keyEquivalent: "")
+        let appItem = NSMenuItem(title: AppBrand.name, action: nil, keyEquivalent: "")
         let appMenu = NSMenu()
-        let quitItem = appMenu.addItem(withTitle: "Quit Jev Clipboard", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let settingsItem = appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsWindow), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(.separator())
+        let quitItem = appMenu.addItem(withTitle: "Quit \(AppBrand.name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
@@ -513,31 +564,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.mainMenu = mainMenu
     }
 
-    private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector, symbol: String) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         item.target = self; menu.addItem(item)
     }
     @objc private func menuSmartPaste() {
         DispatchQueue.main.async { self.smartPaste() }
     }
     @objc private func cancelSelection() { cancel() }
-    @objc private func togglePause() { paused.toggle(); cancel(); rebuildMenu(); refreshHistoryModel() }
     @objc private func clearHistory() {
+        cancelFileCapture()
         history.clear(); suggestions.removeAll(); selected = nil; timing = ""; operationStatus = nil
         cancel(); persistHistory()
     }
     private func persistHistory() {
-        do { try store.save(history: history, pins: pins) }
-        catch { operationStatus = "Could not save clipboard history" }
+        do { try store.save(history: history, pins: pins, protectedHistoryAssetID: clipboardAssetID) }
+        catch { operationStatus = store.loadError?.localizedDescription ?? "Could not save clipboard history" }
         refreshHistoryModel(); rebuildMenu()
     }
     private func refreshHistoryModel() {
         historyModel.items = history.items
-        historyModel.pins = pins
-        historyModel.paused = paused
+        historyModel.updatePins(pins)
         historyModel.message = operationStatus ?? ""
     }
     private func configureHistoryModel() {
+        historyModel.onSettings = { [weak self] in self?.openSettingsWindow() }
+        historyModel.fileURL = { [weak self] clip in self?.store.assetPath(clip) }
         historyModel.imageURL = { [weak self] id in self?.store.imagePath(id: id) }
         historyModel.onCopy = { [weak self] id in self?.copyItem(id: id) }
         historyModel.onDelete = { [weak self] id in
@@ -545,7 +598,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.persistHistory()
         }
         historyModel.onClear = { [weak self] in self?.clearHistory() }
-        historyModel.onPause = { [weak self] in self?.togglePause() }
         historyModel.assetURL = { [weak self] entry in self?.store.assetPath(entry) }
         historyModel.onImportAsset = { [weak self] id, url, kind, otherBytes, completion in
             guard let self else { return }
@@ -556,19 +608,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
         }
         historyModel.onSavePins = { [weak self] newPins in
-            guard let self, newPins.count <= PinnedEntry.maximumCount else { return }
+            guard let self, newPins.count <= PinnedEntry.maximumCount else { return false }
             self.cancel()
             let previous = self.pins
+            var saved = false
             self.pins = newPins
             do {
-                try self.store.save(history: self.history, pins: self.pins)
+                try self.store.save(history: self.history, pins: self.pins, protectedHistoryAssetID: self.clipboardAssetID)
                 self.store.removeUnusedAssets(keeping: self.pins, protectedAssetID: self.clipboardAssetID)
-                self.operationStatus = "Persistent entries saved"
+                self.operationStatus = "Saved entries updated"
+                saved = true
             } catch {
                 self.pins = previous
                 self.operationStatus = error.localizedDescription
             }
             self.refreshHistoryModel(); self.rebuildMenu()
+            return saved
         }
         refreshHistoryModel()
     }
@@ -585,10 +640,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc private func openHistoryWindow() {
         if historyWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 560),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
-            window.title = "Jev Clipboard"
+            window.title = AppBrand.name
+            CarbonTheme.apply(to: window)
+            window.setFrameAutosaveName("CuekitCarbonClipboard")
             window.center()
             window.contentView = NSHostingView(rootView: HistoryWindowView(model: historyModel))
             window.isReleasedWhenClosed = false
@@ -602,26 +659,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === historyWindow, historyModel.hasUnsavedChanges else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to Always Available?"
+        alert.informativeText = "Your saved entries have unsaved changes."
+        alert.addButton(withTitle: "Save Changes")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Discard Changes")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return historyModel.saveDrafts()
+        case .alertThirdButtonReturn: historyModel.discardDrafts(); return true
+        default: return false
+        }
+    }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard historyModel.hasUnsavedChanges, let window = historyWindow else { return .terminateNow }
+        return windowShouldClose(window) ? .terminateNow : .terminateCancel
+    }
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let closing = notification.object as? NSWindow
+        updateActivation(excluding: closing)
+    }
+    private func updateActivation(excluding closing: NSWindow? = nil) {
+        let anyVisible = [historyWindow, settingsWindow, keyWindow?.window]
+            .compactMap { $0 }.contains { $0 !== closing && $0.isVisible }
+        NSApp.setActivationPolicy(anyVisible ? .regular : .accessory)
+    }
+    func windowDidBecomeKey(_ notification: Notification) { refreshSettingsModel() }
+
+    private func configureSettingsModel() {
+        settingsModel.onRefresh = { [weak self] in self?.refreshSettingsModel() }
+        settingsModel.onReconnect = { [weak self] in self?.restart(); self?.refreshSettingsModel() }
+        settingsModel.onKey = { [weak self] in self?.configureJev() }
+        settingsModel.onClipboard = { [weak self] in self?.openHistoryWindow() }
+        settingsModel.onAccessibility = {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        }
+        settingsModel.onScreenRecording = {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        }
+    }
+    private func refreshSettingsModel() {
+        settingsModel.connected = ready
+        settingsModel.connectionStatus = connectionStatus
+        settingsModel.shortcutRegistered = shortcutRegistered
+        settingsModel.accessibilityAllowed = AXIsProcessTrusted()
+        settingsModel.screenRecordingAllowed = CGPreflightScreenCaptureAccess()
+    }
+    @objc private func openSettingsWindow() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 840, height: 640),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "Cuekit Settings"
+            CarbonTheme.apply(to: window)
+            window.contentView = NSHostingView(rootView: SettingsView(model: settingsModel))
+            window.isReleasedWhenClosed = false; window.delegate = self
+            window.setFrameAutosaveName("CuekitCarbonSettings"); window.center()
+            settingsWindow = window
+        }
+        refreshSettingsModel()
+        NSApp.setActivationPolicy(.regular)
+        settingsWindow?.deminiaturize(nil); settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func configureJev() {
+        cancelFileCapture()
         cancel()
-        do {
-            guard let key = NSPasteboard.general.string(forType: .string) else {
-                throw ClipboardError.message("Copy your TypeSafe API key first.")
+        if keyWindow == nil {
+            let model = TypeSafeKeyModel(verify: { [weak self] key, completion in
+                guard let client = self?.client else {
+                    completion(.failure(ClipboardError.message("TypeSafe is unavailable in this preview.")))
+                    return nil
+                }
+                return client.verifyCredential(key, completion: completion)
+            }, save: { [weak self] key in
+                try JevCredential.save(key)
+                self?.history.removeCredential(key)
+                self?.persistHistory()
+            })
+            model.onSaved = { [weak self] in
+                guard let self else { return }
+                self.operationStatus = self.store.loadError?.localizedDescription ?? "Key verified and saved in macOS Keychain"
+                self.ready = false; self.client.start()
             }
-            try JevCredential.save(key)
-            // A copied credential must not enter candidate history.
-            history.clear(); suggestions.removeAll(); selected = nil
-            persistHistory()
-            lastChange = NSPasteboard.general.changeCount
-            operationStatus = "Key saved in macOS Keychain"
-            ready = false; worker?.start()
-        } catch { showError(error.localizedDescription) }
+            keyWindow = TypeSafeKeyWindow(model: model)
+            keyWindow?.onClose = { [weak self] in
+                self?.lastChange = NSPasteboard.general.changeCount
+                self?.updateActivation(excluding: self?.keyWindow?.window)
+            }
+        }
+        NSApp.setActivationPolicy(.regular)
+        keyWindow?.present()
     }
-    @objc private func restart() { cancel(); ready = false; worker?.start() }
+    @objc private func restart() { cancel(); ready = false; client?.start() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func accessibility() {
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
@@ -660,8 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 } else { report["error"] = "focused_element_unavailable" }
             } else { report["error"] = "target_not_running" }
             let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
-            let output = Bundle.main.bundleURL.deletingLastPathComponent()
-                .appendingPathComponent("results/jev-app/capture-diagnostics.json")
+            let output = AppPaths.diagnostic("capture-diagnostics.json")
             try? data.write(to: output, options: .atomic)
             print(String(data: data, encoding: .utf8)!)
             return

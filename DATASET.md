@@ -1,42 +1,53 @@
-# Local selection dataset
+# Development selection datasets
 
-The app's Python worker records inference requests by default in
-`results/selection-dataset/` beside this file. The existing `results/` Git ignore
-rule excludes this private content from normal Git additions. Directory access
-is restricted to this account (0700); records use 0600. This is local storage,
-not app-level encryption. Records contain clipboard excerpts and destination
-text that were included in a Jev request. They must be reviewed before sharing.
+Normal builds contain no dataset recorder and ignore `CUEKIT_DATASET_ROOT`.
+Evaluation timing logs are also compiled out. Python is retained only for
+synthetic tests, benchmarks and reference evaluation, not the shipped app.
 
-Each inference has an immutable UUID `.request.json` and `.result.json` pair:
+To collect an explicitly opted-in development dataset:
+
+1. Build with `./build.sh --development` (do not distribute this build).
+2. Quit running Cuekit instances.
+3. Launch the development executable from Terminal with a private output path:
+
+```sh
+CUEKIT_DATASET_ROOT="$PWD/results/selection-dataset" "$PWD/Cuekit.app/Contents/MacOS/LayaClipboard"
+```
+
+Only this process receives the setting. A development build without an output
+path does not collect records. Return to `./build.sh` for a normal build; the
+build fingerprint distinguishes the configurations.
+
+Records contain clipboard excerpts and destination text sent to Jev. They are
+local, not encrypted by the app, and must be reviewed before sharing. The output
+directory must belong to this account with mode 0700; files use 0600. `results/`
+is Git-ignored. Clear History does not erase datasets; retain or remove these
+files deliberately.
+
+Each native inference produces immutable UUID `.request.json` and `.result.json`
+files using schema version 2:
 
 - Request: exact constructed API request, C0/C1-to-history-ID mapping, UTC time,
-  schema version and hashes of the request/context source files.
-- Result: parsed API response (including probabilities/confidence/usage where
-  supplied), final selection after local overrides, elapsed time, or a safe error.
-- Labels start as `unlabelled`; request success is not evidence of correctness.
-- The worker cannot observe whether the native app posted a paste, whether the
-  destination accepted it, or whether the choice met the user's intent.
+  and an initially unlabelled status. Native records do not include source hashes.
+- Result: parsed valid API response, final Jev-only selection or confidence/NONE
+  fallback, elapsed time, or a safe error.
+- The client cannot observe whether the destination accepted a paste or whether
+  the choice met the user’s intent. Success is not a correctness label.
 
-Authentication headers, the API key and the worker's credential-setup message
-are never recorded. Error HTTP bodies and malformed responses are omitted.
-Health checks and requests rejected before dispatch preparation are not recorded.
-No screenshots, image/file bytes, or full untruncated history values are added.
-Consequently this dataset supports replay of the selector's actual inputs; it
-cannot recreate source context that was never captured or text already truncated.
+Authentication headers and the API key are excluded. Requests containing the
+configured key are rejected. Error HTTP bodies and malformed responses are
+omitted. Connection checks are not recorded. Images/file bytes and full history
+are not added; records cannot recover context omitted or truncated before send.
 
-A request is persisted before the HTTP attempt. A request without a matching
-result indicates an interrupted or incomplete attempt, not a successful send.
-If recording fails, selection returns an error instead of silently proceeding
-without a dataset record. Records are retained until explicitly removed.
+The request is persisted before the HTTP attempt. A request without a result
+means interrupted/incomplete, not successful. Recording failure blocks selection
+in this explicitly enabled mode. Records are retained until removed.
 
-For evaluation, create a separate `<UUID>.label.json` sidecar containing the
-expected candidate ID (C0, C1, etc.), or `ambiguous` / `none_suitable`, plus a brief
-reason. Do not replace the recorded model answer with the label. `NONE` currently
-means the selector requested a latest-clipboard fallback; it does not establish
-that this fallback was correct.
+For evaluation, add a separate `<UUID>.label.json` with an expected candidate ID,
+`ambiguous` or `none_suitable`, and a reason. Keep labels separate from model
+answers. Neither `NONE` nor a low-confidence fallback establishes correctness.
 
-Existing Python workers must restart to load this code. No Swift rebuild is
-needed: choose **Troubleshooting → Restart Jev**. Check that a new request/result
-pair appears after the next Smart Paste. Synthetic tests use temporary directories
-and make no hosted calls. Direct uses of `JevSelector` outside the app record only
-when explicitly given a recorder, keeping benchmarks out of the personal dataset.
+The Python reference recorder retains its schema-1 source hashes for development
+benchmarks. Direct `JevSelector` use records only when supplied a recorder; the
+legacy development worker requires `CUEKIT_DATASET_ROOT`. Synthetic tests use
+temporary directories and no hosted calls. Paid benchmarks must be run explicitly.

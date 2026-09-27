@@ -25,10 +25,20 @@ def contains_secret(value, secret):
 class RequestDataset:
     def __init__(self, root=None):
         project = Path(__file__).resolve().parents[1]
-        self.root = Path(root) if root is not None else project / 'results' / 'selection-dataset'
+        self.root = Path(root) if root is not None else Path(os.environ.get(
+            'CUEKIT_DATASET_ROOT', str(project / 'results' / 'selection-dataset')))
         paths = ['runtime/jev_selector.py', 'runtime/destination_context.py',
                  'runtime/context_evidence.py', 'Sources/CandidateText.swift', 'Sources/Context.swift']
-        self.source_hashes = {p: hashlib.sha256((project / p).read_bytes()).hexdigest() for p in paths}
+        manifest = project / 'source-hashes.json'
+        if manifest.is_file():
+            self.source_hashes = json.loads(manifest.read_text())
+            if set(self.source_hashes) != set(paths) or not all(
+                    isinstance(value, str) and len(value) == 64
+                    and all(c in '0123456789abcdef' for c in value)
+                    for value in self.source_hashes.values()):
+                raise DatasetError('Invalid bundled source manifest.')
+        else:
+            self.source_hashes = {p: hashlib.sha256((project / p).read_bytes()).hexdigest() for p in paths}
 
     def write(self, name, record):
         try:

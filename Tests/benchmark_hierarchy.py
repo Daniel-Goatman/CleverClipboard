@@ -126,13 +126,14 @@ def main():
                         raise RuntimeError('Jev status '+str(response.status))
                     parsed = json.loads(raw)
                     selected = module.result_for(parsed, request, ids)
-                    direct = module.result_for(parsed, request, ids, recency=False)
+                    raw_choice = parsed['answers']['pick']['choice']
+                    direct_id = ids[int(raw_choice[1:])] if raw_choice != 'NONE' else 'latest'
                     pick = lambda result: result['ranked'][0]['id'] if result['ranked'] else 'latest'
                     answer = parsed['answers']['pick']
                     probs = answer['probabilities']
                     row = {'case': case['name'], 'round': repeat+1, 'policy': policy,
                            'expected': case['expected'], 'selected': pick(selected),
-                           'model_only': pick(direct), 'decision': selected['decision'],
+                           'model_only': direct_id, 'decision': selected['decision'],
                            'recency_changed': selected.get('recency_changed', False),
                            'top_probability': probs[answer['choice']],
                            'api_ms': round(elapsed, 1), 'cold_connection': cold,

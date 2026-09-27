@@ -10,6 +10,7 @@ final class PreviewPanel: NSPanel {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 430, height: 280),
                    styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
                    backing: .buffered, defer: false)
+        CarbonTheme.apply(to: self)
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         isFloatingPanel = true
@@ -30,11 +31,11 @@ final class PreviewPanel: NSPanel {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 18, right: 20)
 
         let heading = NSTextField(labelWithString: title)
-        heading.font = .systemFont(ofSize: 18, weight: .semibold)
+        heading.font = .systemFont(ofSize: 18, weight: .medium)
         stack.addArrangedSubview(heading)
         let subtitle = NSTextField(wrappingLabelWithString: detail)
         subtitle.font = .systemFont(ofSize: 12)
-        subtitle.textColor = .secondaryLabelColor
+        subtitle.textColor = NSColor(srgbRed: 0.69, green: 0.70, blue: 0.68, alpha: 1)
         subtitle.preferredMaxLayoutWidth = 390
         subtitle.widthAnchor.constraint(equalToConstant: 390).isActive = true
         stack.addArrangedSubview(subtitle)
@@ -79,9 +80,7 @@ final class PreviewPanel: NSPanel {
         }
         footer.addArrangedSubview(actionButton("Cancel  Esc", action: cancel))
         stack.addArrangedSubview(footer)
-        let view = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 430, height: 600))
-        view.material = .popover
-        view.state = .active
+        let view = CarbonBackdropView(frame: NSRect(x: 0, y: 0, width: 430, height: 600))
         view.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

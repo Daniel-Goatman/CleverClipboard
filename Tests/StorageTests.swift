@@ -101,6 +101,32 @@ import Foundation
         precondition(candidates.count == ClipboardSelection.maximumCandidates)
         precondition(candidates.filter(\.pinned).count == PinnedEntry.maximumCount)
         precondition(candidates.filter { !$0.pinned }.count == 32)
+        // A damaged or future-version library must never become an empty save
+        // followed by asset pruning. All fixtures live under this temporary root.
+        let preservedID = UUID().uuidString
+        try store.writeImage(bytes, id: preservedID)
+        let metadata = folder.appendingPathComponent("Library.json")
+        let good = try Data(contentsOf: metadata)
+        for damaged in [Data("not JSON".utf8), Data(#"{"version":999,"items":[],"pins":[]}"#.utf8)] {
+            try damaged.write(to: metadata)
+            let (empty, emptyPins) = store.load()
+            precondition(store.loadError != nil && empty.items.isEmpty)
+            do { try store.save(history: empty, pins: emptyPins); fatalError("Damaged library overwritten") }
+            catch ClipboardStore.StoreError.unreadableLibrary { }
+            store.removeUnusedAssets(keeping: [])
+            let retainedMetadata = try Data(contentsOf: metadata)
+            precondition(retainedMetadata == damaged)
+            precondition(store.readImage(id: preservedID) == bytes)
+            precondition(FileManager.default.fileExists(atPath: store.assetPath(imageEntry)!.path))
+        }
+        try good.write(to: metadata)
+        _ = store.load()
+        precondition(store.loadError == nil, "Restoring valid metadata must allow recovery")
+        var credentialHistory = History()
+        credentialHistory.add("keep this", app: "Fixture")
+        credentialHistory.add(" synthetic-api-key ", app: "Fixture")
+        credentialHistory.removeCredential("synthetic-api-key")
+        precondition(credentialHistory.items.map(\.text) == ["keep this"])
         print("PASS: v1/v2 migration, v3 assets, OCR, file snapshot, limits, candidate filtering and cleanup")
     }
 }

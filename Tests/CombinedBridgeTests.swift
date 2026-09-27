@@ -28,10 +28,10 @@ import Foundation
         var longSource = text
         longSource.candidateSourceContext = String(repeating: "A", count: 250) +
             "DISTINCT-SOURCE-LABEL" + String(repeating: "B", count: 550)
-        let shortened = ModelWorker.requestPayload(context: "Input label: Revenue", clips: [longSource])
+        let shortened = JevRequest.payload(context: "Input label: Revenue", clips: [longSource])
         let shortenedItem = (shortened["items"] as! [[String: Any]])[0]
         precondition(shortenedItem["source_context_truncated"] as? Bool == true)
-        let payload = ModelWorker.requestPayload(context: "Input label: Revenue", clips: candidates, now: at.addingTimeInterval(2))
+        let payload = JevRequest.payload(context: "Input label: Revenue", clips: candidates, now: at.addingTimeInterval(2))
         let wrapped: [String: Any] = ["payload": payload, "text_id": text.id, "original_text": text.text]
         let output = try JSONSerialization.data(withJSONObject: wrapped, options: [.sortedKeys])
         FileHandle.standardOutput.write(output)

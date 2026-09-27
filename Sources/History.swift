@@ -337,6 +337,14 @@ struct History {
         trim(); return items.contains { $0.id == id }
     }
 
+    @discardableResult mutating func addFile(_ clip: Clip) -> Bool {
+        guard clip.kind == .file, !clip.pinned, clip.fileBytes > 0,
+              clip.fileBytes <= Self.maximumItemBytes, UUID(uuidString: clip.id) != nil,
+              clip.assetID == clip.id else { return false }
+        items.insert(clip, at: 0)
+        trim(); return items.contains { $0.id == clip.id }
+    }
+
     mutating func updateOCR(id: String, text: String) {
         guard let index = items.firstIndex(where: { $0.id == id && $0.kind == .image }) else { return }
         items[index].ocrText = String(text.prefix(1200))
@@ -362,6 +370,10 @@ struct History {
             return clip
         }
         trim()
+    }
+    mutating func removeCredential(_ key: String) {
+        let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        items.removeAll { $0.kind == .text && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == value }
     }
     mutating func clear() { items.removeAll(keepingCapacity: false) }
     private mutating func trim() {

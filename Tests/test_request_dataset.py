@@ -5,11 +5,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runtime'))
 from jev_selector import JevSelector, SelectionError, MODEL, make_request
-from request_dataset import RequestDataset
+import request_dataset
+from request_dataset import RequestDataset, DatasetError
 
 KEY = 'synthetic-test-key-not-real'
 
@@ -46,7 +48,7 @@ class DatasetTests(unittest.TestCase):
             {'id': 'older', 'text': '8 Cedar Road', 'app': 'Notes', 'recency_rank': 1},
             {'id': 'newer', 'text': '42 Harbour Road', 'app': 'Mail', 'recency_rank': 0}]}
         self.response = {'model': MODEL, 'answers': {'pick': {'type': 'choice',
-            'choice': 'C0', 'confidence': .1,
+            'choice': 'C0', 'confidence': .9,
             'probabilities': {'C0': .52, 'C1': .48, 'NONE': 0}}},
             'usage': {'input_tokens': 300, 'output_tokens': 20}}
 
@@ -57,7 +59,7 @@ class DatasetTests(unittest.TestCase):
     def records(self):
         return {p.suffixes[-2]: json.loads(p.read_text()) for p in self.root.glob('*.json')}
 
-    def test_exact_request_response_mapping_and_override_are_saved_privately(self):
+    def test_exact_request_response_mapping_and_jev_choice_are_saved_privately(self):
         result = self.selector().rank(self.payload)
         records = self.records()
         request, response = records['.request'], records['.result']
@@ -65,9 +67,9 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(request['candidate_id_map'], {'C0': 'older', 'C1': 'newer'})
         self.assertEqual(response['response'], self.response)
         self.assertEqual(response['selection_result'], result)
-        self.assertTrue(result['recency_changed'])
+        self.assertNotIn('recency_changed', result)
         self.assertEqual(result['model_choice'], 'older')
-        self.assertEqual(result['ranked'][0]['id'], 'newer')
+        self.assertEqual(result['ranked'][0]['id'], 'older')
         self.assertEqual(request['label']['status'], 'unlabelled')
         self.assertEqual(response['paste_outcome'], 'not_observed_by_worker')
         self.assertEqual(request['record_id'], response['record_id'])
@@ -153,6 +155,35 @@ jev_worker.main()
                                 cwd=ROOT / 'runtime', capture_output=True, text=True, check=True)
         self.assertEqual([json.loads(line)['type'] for line in result.stdout.splitlines()], ['ready', 'ready'])
         self.assertFalse(self.root.exists())
+
+
+class PackagedDatasetTests(unittest.TestCase):
+    def test_packaged_runtime_uses_manifest_and_private_external_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            resources = Path(tmp) / 'Resources'
+            runtime = resources / 'runtime'
+            runtime.mkdir(parents=True)
+            source_hashes = RequestDataset(Path(tmp) / 'unused').source_hashes
+            (resources / 'source-hashes.json').write_text(json.dumps(source_hashes))
+            destination = Path(tmp) / 'user-support' / 'selection-dataset'
+            with patch.object(request_dataset, '__file__', str(runtime / 'request_dataset.py')), \
+                 patch.dict(os.environ, {'CUEKIT_DATASET_ROOT': str(destination)}):
+                recorder = RequestDataset()
+                self.assertEqual(recorder.source_hashes, source_hashes)
+                recorder.write('synthetic.json', {'fixture': True})
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((destination / 'synthetic.json').stat().st_mode & 0o777, 0o600)
+            self.assertFalse((resources / 'results').exists())
+
+    def test_invalid_packaged_manifest_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            resources = Path(tmp)
+            runtime = resources / 'runtime'
+            runtime.mkdir()
+            (resources / 'source-hashes.json').write_text('{"unexpected":"hash"}')
+            with patch.object(request_dataset, '__file__', str(runtime / 'request_dataset.py')):
+                with self.assertRaises(DatasetError):
+                    RequestDataset(resources / 'unused')
 
 
 if __name__ == '__main__':

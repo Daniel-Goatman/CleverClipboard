@@ -2,7 +2,6 @@
 import http.client
 import json
 import math
-import re
 import ssl
 import threading
 import time
@@ -11,7 +10,7 @@ from request_dataset import DatasetError, contains_secret
 
 MODEL = 'jev-1.13.0'
 HOST = 'api.typesafe.ai'
-FALLBACK = 'No clear clipboard match. Choose an item from History.'
+CONFIDENCE_THRESHOLD = 0.7
 MAX_REQUEST_BYTES = 24000  # Reserves 8k below 32k; not a provider token guarantee.
 TEXT_BUDGET = 12000
 MAX_ITEM_TEXT = 4000
@@ -52,7 +51,7 @@ def text_allowances(items, budget=TEXT_BUDGET):
     return limits
 
 def request_body(request):
-    body = json.dumps(request, ensure_ascii=False).encode('utf-8')
+    body = json.dumps(request, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     if len(body) > MAX_REQUEST_BYTES:
         raise SelectionError('Clipboard/context exceeds the conservative request limit. Nothing was sent.')
     return body
@@ -156,21 +155,7 @@ def make_request(payload):
                 raise
     return request, ids
 
-def matched_hint(candidate, destination):
-    if not candidate['pinned'] or not candidate['purpose_hint']:
-        return False
-    words = set(re.findall(r'[a-z]{4,}', candidate['purpose_hint'].lower())) - {'this','that','with','from','when','entry','paste','text','your'}
-    insertion = destination.get('insertion', {})
-    if insertion.get('available'):
-        # The local tie-break must follow the same evidence hierarchy as Jev.
-        relevant = {'before': insertion.get('before', ''), 'after': insertion.get('after', ''),
-                    'field': destination.get('field', {})}
-    else:
-        relevant = destination
-    observed = json.dumps(relevant, ensure_ascii=False).lower()
-    return bool(words) and any(re.search(r'\b'+re.escape(word)+r'\b', observed) for word in words)
-
-def result_for(response, request, ids, recency=True):
+def result_for(response, request, ids):
     try:
         if response['model'] != MODEL or set(response['answers']) != {'pick'}:
             raise ValueError()
@@ -185,22 +170,14 @@ def result_for(response, request, ids, recency=True):
         chosen = answer['choice']
         if abs(sum(probabilities.values())-1) > .015 or probabilities[chosen] < max(probabilities.values())-1e-6:
             raise ValueError()
-        destination = request['state']['destination']
-        if chosen == 'NONE':
-            return {'type':'result', 'ranked':[], 'error':FALLBACK,
-                    'eligible':len(ids), 'decision':'latest'}
-        decision = 'jev'
-        top = probabilities[chosen]
-        if recency:
-            winner = candidates[int(chosen[1:])]
-            close = [c for c in candidates if c['kind'] == winner['kind']
-                and top - probabilities[c['id']] <= .05 and probabilities[c['id']] >= top * .65]
-            if close:
-                chosen = min(close, key=lambda c: (not matched_hint(c, destination),
-                    c['pinned'] and not matched_hint(c, destination), c['recency_rank']))['id']
-        return {'type':'result', 'ranked':[{'id':ids[int(chosen[1:])], 'score':probabilities[chosen]}],
-                'eligible':len(ids), 'model_choice':ids[int(answer['choice'][1:])],
-                'recency_changed':chosen != answer['choice'], 'decision':decision}
+        confidence = answer['confidence']
+        original = None if chosen == 'NONE' else ids[int(chosen[1:])]
+        if chosen == 'NONE' or confidence <= CONFIDENCE_THRESHOLD:
+            return {'type':'result', 'ranked':[], 'eligible':len(ids), 'decision':'latest',
+                    'confidence':confidence, 'model_choice':original,
+                    'fallback_reason':'no_match' if chosen == 'NONE' else 'low_confidence'}
+        return {'type':'result', 'ranked':[{'id':original, 'score':probabilities[chosen]}],
+                'eligible':len(ids), 'model_choice':original, 'confidence':confidence, 'decision':'jev'}
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         raise SelectionError('Jev returned an invalid selection. Nothing was pasted.') from None
 

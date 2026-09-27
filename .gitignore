@@ -14,3 +14,15 @@ __pycache__/
 .venv/
 .vscode/
 .idea/
+
+# Local verification artifacts, captures and app backups
+output/
+
+# Clipboard libraries and private asset snapshots
+Library.json
+HistoryAssets/
+HistoryFiles/
+Images/
+SavedAssets/
+*.request.json
+*.result.json

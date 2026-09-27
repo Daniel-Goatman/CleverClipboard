@@ -43,7 +43,7 @@ def main():
     with tempfile.TemporaryDirectory() as temporary:
         binary = Path(temporary) / 'bridge'
         sources = ['Sources/Diagnostics.swift', 'Sources/Context.swift', 'Sources/History.swift',
-                   'Sources/CandidateText.swift', 'Sources/ModelWorker.swift', 'Sources/JevCredential.swift',
+                   'Sources/CandidateText.swift', 'Sources/JevRequest.swift', 'Sources/DestinationContext.swift',
                    'Sources/ImageOCR.swift', 'Tests/CombinedBridgeTests.swift']
         subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-module-cache-path',
                         str(ROOT / '.build/module-cache'), *(str(ROOT / s) for s in sources),

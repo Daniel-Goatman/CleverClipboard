@@ -23,7 +23,7 @@ enum CandidateText {
         excerpt(clip.candidateText, limit: min(1600, 12000 / max(1, candidateCount)))
     }
 
-    private static func excerpt(_ source: String, limit: Int) -> String {
+    static func excerpt(_ source: String, limit: Int) -> String {
         let bytes = Array(source.utf8)
         if bytes.count <= limit { return source }
         let marker = " … "

@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 from destination_context import hierarchical_destination
-from jev_selector import matched_hint
 
 
 def context(before, after='', **extra):
@@ -42,7 +41,6 @@ class HierarchyTests(unittest.TestCase):
         self.assertEqual(d['insertion']['before'], 'My email is ')
         self.assertEqual(d['application']['window_title'], 'Invoice payment')
         self.assertEqual(d['priority_order'], ['insertion', 'field', 'document', 'application'])
-        self.assertFalse(matched_hint({'pinned': True, 'purpose_hint': 'Invoice payment'}, d))
 
     def test_known_caret_keeps_associated_section_without_noisy_neighbors(self):
         raw = json.loads(context('', ancestors=[{'role': 'AXGroup', 'text': 'Conversation with Maya'}],
@@ -125,10 +123,10 @@ class HierarchyTests(unittest.TestCase):
         self.assertLessEqual(len(d['insertion']['before'].encode()), 300)
         self.assertLessEqual(len(d['insertion']['after'].encode()), 160)
 
-    def test_background_does_not_trigger_pinned_tie_break(self):
+    def test_background_stays_below_insertion(self):
         d = hierarchical_destination(context('My email: ', windowTitle='Invoice payment'))
-        self.assertFalse(matched_hint({'pinned': True, 'purpose_hint': 'Invoice payment'}, d))
-        self.assertTrue(matched_hint({'pinned': True, 'purpose_hint': 'My email'}, d))
+        self.assertEqual(d['priority_order'][0], 'insertion')
+        self.assertEqual(d['insertion']['before'], 'My email: ')
 
     def test_source_and_replacement_retained(self):
         raw = json.loads(context('Contact: ', ' tomorrow'))

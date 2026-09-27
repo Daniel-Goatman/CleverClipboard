@@ -39,9 +39,9 @@ for name,context,raw,expected in cases:
         if reply.status != 200: raise RuntimeError('Jev status '+str(reply.status))
         parsed=json.loads(data)
         selected=module.result_for(parsed,req,ids)
-        plain=new.result_for(parsed,req,ids,recency=False) if label=='new' else selected
+        plain_id=ids[int(parsed['answers']['pick']['choice'][1:])] if parsed['answers']['pick']['choice'] != 'NONE' else 'latest'
         pick=lambda r:r['ranked'][0]['id'] if r['ranked'] else 'latest'
-        entries.append({'policy':label,'selected':pick(selected),'model_only':pick(plain),
+        entries.append({'policy':label,'selected':pick(selected),'model_only':plain_id,
                         'ms':round((time.perf_counter()-start)*1000)})
         if reply.will_close: client.close()
     rows.append({'case':name,'expected':expected,'runs':entries})
