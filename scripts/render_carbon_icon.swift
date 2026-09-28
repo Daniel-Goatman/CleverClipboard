@@ -54,13 +54,13 @@ import AppKit
     }
     static func main() throws {
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-        let iconset = root.appendingPathComponent("Cuekit.iconset")
+        let iconset = root.appendingPathComponent("CleverClipboard.iconset")
         try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
         for size in [16, 32, 128, 256, 512] {
             try image(size: size).write(to: iconset.appendingPathComponent("icon_\(size)x\(size).png"))
             try image(size: size * 2).write(to: iconset.appendingPathComponent("icon_\(size)x\(size)@2x.png"))
         }
-        try image(size: 1024).write(to: root.appendingPathComponent("Cuekit.png"))
+        try image(size: 1024).write(to: root.appendingPathComponent("CleverClipboard.png"))
         print("Rendered Carbon master and all standard/Retina representations")
     }
 }

@@ -11,7 +11,7 @@ private final class JevSessionDelegate: NSObject, URLSessionTaskDelegate {
 
 /// Native HTTPS client. Mutable state belongs to one serial queue; UI callbacks use main.
 final class JevClient {
-    private let queue = DispatchQueue(label: "Cuekit.jev", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "CleverClipboard.jev", qos: .userInitiated)
     private let session: URLSession
     private let credential: () throws -> String
     private var task: URLSessionDataTask?
@@ -111,7 +111,7 @@ final class JevClient {
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.httpBody = try JevRequest.encode(prepared.body)
-                #if CUEKIT_DEVELOPMENT
+                #if CLEVERCLIPBOARD_DEVELOPMENT
                 let record = try DevelopmentDataset.begin(request: prepared.body, ids: prepared.ids)
                 #endif
                 try dataset?.append("request", ["request": prepared.body,
@@ -131,7 +131,7 @@ final class JevClient {
                             }
                             var result = try JevRequest.result(parsed, ids: prepared.ids)
                             result.elapsed_ms = (ProcessInfo.processInfo.systemUptime-started)*1000
-                            #if CUEKIT_DEVELOPMENT
+                            #if CLEVERCLIPBOARD_DEVELOPMENT
                             try record?.finish(response: parsed, result: result, error: nil)
                             #endif
                             let selection = try JSONSerialization.jsonObject(with: JSONEncoder().encode(result))
@@ -142,7 +142,7 @@ final class JevClient {
                             if let response = response as? HTTPURLResponse, [401,403].contains(response.statusCode) {
                                 self.report("TypeSafe rejected the API key. Update it from the menu.", false)
                             }
-                            #if CUEKIT_DEVELOPMENT
+                            #if CLEVERCLIPBOARD_DEVELOPMENT
                             try? record?.finish(response: nil, result: nil, error: "Selection failed")
                             #endif
                             complete(.failure(error))

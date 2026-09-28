@@ -167,7 +167,7 @@ class PackagedDatasetTests(unittest.TestCase):
             (resources / 'source-hashes.json').write_text(json.dumps(source_hashes))
             destination = Path(tmp) / 'user-support' / 'selection-dataset'
             with patch.object(request_dataset, '__file__', str(runtime / 'request_dataset.py')), \
-                 patch.dict(os.environ, {'CUEKIT_DATASET_ROOT': str(destination)}):
+                 patch.dict(os.environ, {'CLEVERCLIPBOARD_DATASET_ROOT': str(destination)}):
                 recorder = RequestDataset()
                 self.assertEqual(recorder.source_hashes, source_hashes)
                 recorder.write('synthetic.json', {'fixture': True})

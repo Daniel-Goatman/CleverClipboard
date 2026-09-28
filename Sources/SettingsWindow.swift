@@ -47,7 +47,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if let icon = AppBrand.icon {
                         Image(nsImage: icon).resizable().interpolation(.high)
-                            .frame(width: 48, height: 48).accessibilityLabel("Cuekit logo")
+                            .frame(width: 48, height: 48).accessibilityLabel("CleverClipboard logo")
                     }
                     Text(AppBrand.name).font(.system(size: 22, weight: .medium))
                 }.padding(.horizontal, 16).padding(.top, 20)
@@ -186,7 +186,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             connectionRow
             Text(model.connectionStatus).font(.system(size: 12)).foregroundStyle(CarbonTheme.secondary).textSelection(.enabled)
-            info("Your API key", "Cuekit verifies your key with TypeSafe before saving it in macOS Keychain. Your existing key remains unchanged if verification fails.")
+            info("Your API key", "CleverClipboard verifies your key with TypeSafe before saving it in macOS Keychain. Your existing key remains unchanged if verification fails.")
             Button { model.onKey() } label: { Label("Manage API Key…", systemImage: "key") }
                 .buttonStyle(CarbonButtonStyle(prominent: true))
             info("Hosted service", "Smart Paste requires internet access and your own TypeSafe account. Hosted selections may incur charges.")

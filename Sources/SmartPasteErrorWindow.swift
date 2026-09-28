@@ -10,7 +10,7 @@ struct SmartPasteFailure {
             switch self {
             case .accessibility: return "Open Accessibility Settings"
             case .screenRecording: return "Open Screen Recording Settings"
-            case .settings: return "Open Cuekit Settings"
+            case .settings: return "Open CleverClipboard Settings"
             }
         }
     }
@@ -23,18 +23,18 @@ struct SmartPasteFailure {
         case .accessibility:
             detail = accessibilityAllowed
                 ? "Accessibility is granted now. Try Smart Paste again in the intended field."
-                : "Accessibility was unavailable for this attempt. Check Cuekit in Applications in System Settings → Privacy & Security → Accessibility, then try again."
+                : "Accessibility was unavailable for this attempt. Check CleverClipboard in Applications in System Settings → Privacy & Security → Accessibility, then try again."
             recovery = accessibilityAllowed ? nil : .accessibility
         case .screen_recording:
             detail = screenRecordingAllowed
                 ? "Screen Recording is granted now. Try Smart Paste again in the intended field."
-                : "Screen Recording was unavailable for this attempt. Check Cuekit in System Settings, then reopen Cuekit if macOS asks you to."
+                : "Screen Recording was unavailable for this attempt. Check CleverClipboard in System Settings, then reopen CleverClipboard if macOS asks you to."
             recovery = screenRecordingAllowed ? nil : .screenRecording
         case .secure_input:
             detail = "Secure keyboard input or a secure field blocked this attempt. Finish secure entry, select a regular text field, and try again."
             recovery = nil
         case .worker_unavailable, .worker_error, .worker_timeout, .worker_busy:
-            detail = "TypeSafe is unavailable or did not finish the request. Check the connection in Cuekit Settings, then try again."
+            detail = "TypeSafe is unavailable or did not finish the request. Check the connection in CleverClipboard Settings, then try again."
             recovery = .settings
         case .no_input, .not_editable, .window_unidentified:
             detail = "Select an editable text field in another app, then press ⌘⇧V again."
@@ -49,7 +49,7 @@ struct SmartPasteFailure {
             detail = "No suitable clipboard item was available. Copy an item or choose one from Clipboard History."
             recovery = nil
         case .clipboard_write, .event_creation:
-            detail = "Cuekit could not prepare or insert the clipboard item. Try again, or copy an item from Clipboard History and paste it with ⌘V."
+            detail = "CleverClipboard could not prepare or insert the clipboard item. Try again, or copy an item from Clipboard History and paste it with ⌘V."
             recovery = nil
         case .modifiers_held:
             detail = "Release the shortcut keys, then try again."
@@ -57,14 +57,14 @@ struct SmartPasteFailure {
         default:
             switch message {
             case "Could not save the Smart Paste dataset. Nothing was pasted.":
-                detail = "Cuekit could not save this attempt locally. Check available disk space and access to the SmartPasteDataset folder, then try again."
+                detail = "CleverClipboard could not save this attempt locally. Check available disk space and access to the SmartPasteDataset folder, then try again."
                 recovery = nil
             case "Paste events were sent, but the dataset outcome could not be saved. Check available disk space.":
                 title = "Dataset recording incomplete"
-                detail = "Paste events were sent, but Cuekit could not save the final outcome. Check available disk space before the next attempt."
+                detail = "Paste events were sent, but CleverClipboard could not save the final outcome. Check available disk space before the next attempt."
                 recovery = nil
             case "TypeSafe rejected the API key. Update it from the menu.", "Configure the TypeSafe API key from the menu.", "Configure a valid TypeSafe API key from the menu.":
-                detail = "TypeSafe needs a valid API key. Check your connection in Cuekit Settings."
+                detail = "TypeSafe needs a valid API key. Check your connection in CleverClipboard Settings."
                 recovery = .settings
             case "Could not reach TypeSafe. Check your connection and try again.", "TypeSafe service unavailable. Nothing was pasted; try again.":
                 detail = "Could not reach TypeSafe. Check your internet connection and try again."
@@ -82,7 +82,7 @@ struct SmartPasteFailure {
                 detail = "The destination app does not expose an active window. Copy an item from Clipboard History and paste it with ⌘V."
                 recovery = nil
             default:
-                detail = "Smart Paste could not complete. Try again, or check your connection in Cuekit Settings."
+                detail = "Smart Paste could not complete. Try again, or check your connection in CleverClipboard Settings."
                 recovery = .settings
             }
         }

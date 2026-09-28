@@ -13,10 +13,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-APP = ROOT / "Cuekit.app"
-EXECUTABLE = APP / "Contents/MacOS/LayaClipboard"
+APP = ROOT / "CleverClipboard.app"
+EXECUTABLE = APP / "Contents/MacOS/CleverClipboard"
 STATUS = ROOT / "results/jev-app/launch-status.json"
-PROCESS_SUFFIXES = ("/Cuekit.app/Contents/MacOS/LayaClipboard",
+PROCESS_SUFFIXES = ("/CleverClipboard.app/Contents/MacOS/CleverClipboard",
+                    "/Cuekit.app/Contents/MacOS/LayaClipboard",
                     "/Jev Clipboard.app/Contents/MacOS/LayaClipboard",
                     "/Laya Clipboard.app/Contents/MacOS/LayaClipboard")
 
@@ -25,8 +26,8 @@ def belongs_to_checkout(executable):
     return executable.parents[3] == ROOT
 
 
-def jev_processes():
-    """Return Cuekit and legacy app processes by PID and exact executable path."""
+def clipboard_processes():
+    """Return CleverClipboard and legacy app processes by PID and exact executable path."""
     output = subprocess.check_output(["/bin/ps", "-axww", "-o", "pid=,command="], text=True)
     processes = {}
     for line in output.splitlines():
@@ -40,7 +41,7 @@ def jev_processes():
                 info = plistlib.load(file)
         except (OSError, ValueError, plistlib.InvalidFileException):
             continue
-        if (info.get("CFBundleName") in ("Cuekit", "Jev Clipboard", "Laya Clipboard")
+        if (info.get("CFBundleName") in ("CleverClipboard", "Cuekit", "Jev Clipboard", "Laya Clipboard")
                 and info.get("CFBundleIdentifier") == "local.daniel.LayaClipboard"):
             processes[int(fields[0])] = executable
     return processes
@@ -49,15 +50,15 @@ def jev_processes():
 def stop_processes(targets):
     for pid, executable in targets.items():
         # Recheck immediately before signaling, including the full path.
-        if jev_processes().get(pid) == executable:
+        if clipboard_processes().get(pid) == executable:
             os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
-        live = jev_processes()
+        live = clipboard_processes()
         if not any(live.get(pid) == path for pid, path in targets.items()):
             return
         time.sleep(0.2)
-    raise RuntimeError(f"Jev process did not stop: {list(targets)}. Quit it from its menu, then retry.")
+    raise RuntimeError(f"Clipboard process did not stop: {list(targets)}. Quit it from its menu, then retry.")
 
 
 def fresh_report(pids, started):
@@ -78,12 +79,12 @@ def launch(replace_other):
     if not EXECUTABLE.is_file():
         raise RuntimeError("App bundle is missing. Run ./build.sh first.")
 
-    processes = jev_processes()
+    processes = clipboard_processes()
     others = {pid: path for pid, path in processes.items() if not belongs_to_checkout(path)}
     if others and not replace_other:
         paths = "\n".join(f"  PID {pid}: {path}" for pid, path in others.items())
         raise RuntimeError(
-            "Another Cuekit/legacy app can own the Smart Paste shortcut:\n"
+            "Another CleverClipboard/legacy app can own the Smart Paste shortcut:\n"
             f"{paths}\n"
             "Quit that instance or rerun with --replace-other-instances."
         )
@@ -92,19 +93,19 @@ def launch(replace_other):
             pid: path for pid, path in processes.items() if belongs_to_checkout(path)
         }
         stop_processes(targets)
-        print(f"Stopped previous Cuekit/legacy process(es): {list(targets)}")
+        print(f"Stopped previous CleverClipboard/legacy process(es): {list(targets)}")
 
     started = time.time()
     subprocess.run(["/usr/bin/open", "-n", "-a", str(APP)], check=True)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
-        pids = {pid for pid, path in jev_processes().items() if path == EXECUTABLE}
+        pids = {pid for pid, path in clipboard_processes().items() if path == EXECUTABLE}
         report = fresh_report(pids, started)
         if report and (
             report.get("worker_ready")
             or report.get("worker_status") not in ("Starting TypeSafe…", "Checking TypeSafe connection…")
         ):
-            print(f"Launched Cuekit (PID {report['pid']}).")
+            print(f"Launched CleverClipboard (PID {report['pid']}).")
             print(f"TypeSafe: {report.get('worker_status', 'status unavailable')}")
             if not report.get("screen_capture", False):
                 print("Screen Recording: off; visible-context OCR is unavailable.")
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.app:
         APP = args.app.resolve()
-        EXECUTABLE = APP / "Contents/MacOS/LayaClipboard"
+        EXECUTABLE = APP / "Contents/MacOS/CleverClipboard"
         ROOT = APP.parent
         STATUS = (APP.parent / "results/jev-app/launch-status.json" if (APP.parent / "build.sh").is_file()
                   else Path.home() / "Library/Application Support/Jev Clipboard/results/jev-app/launch-status.json")

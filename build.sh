@@ -7,7 +7,7 @@ usage() {
     print '  --launch                  Restart this checkout app after building.'
     print '  --development             Include opt-in evaluation logging (never distribute this build).'
     print '  --force                   Recompile even when the signed app is current.'
-    print '  --replace-other-instances Also stop Cuekit/legacy apps from other checkouts.'
+    print '  --replace-other-instances Also stop CleverClipboard/legacy apps from other checkouts.'
 }
 
 launch=false
@@ -19,16 +19,16 @@ for arg in "$@"; do
     case "$arg" in
         --launch) launch=true ;;
         --force) force=true ;;
-        --development) development=true; swift_flags=(-D CUEKIT_DEVELOPMENT) ;;
+        --development) development=true; swift_flags=(-D CLEVERCLIPBOARD_DEVELOPMENT) ;;
         --replace-other-instances) launch=true; replace_other=true ;;
         -h|--help) usage; exit 0 ;;
         *) print -u2 "Unknown option: $arg"; usage >&2; exit 2 ;;
     esac
 done
 
-app='Cuekit.app'
-executable="$app/Contents/MacOS/LayaClipboard"
-stamp='.build/jev-build.sha256'
+app='CleverClipboard.app'
+executable="$app/Contents/MacOS/CleverClipboard"
+stamp='.build/cleverclipboard-build.sha256'
 mkdir -p .build/module-cache results/jev-app
 
 # Source/toolchain fingerprint avoids repeat compilation. The bundle must also
@@ -55,8 +55,8 @@ fi
 if [[ "$current" == true ]]; then
     print 'Build is current; skipped compilation.'
 else
-    stage_root=$(/usr/bin/mktemp -d .build/jev-stage.XXXXXXXX)
-    stage_app="$stage_root/Cuekit.app"
+    stage_root=$(/usr/bin/mktemp -d .build/cleverclipboard-stage.XXXXXXXX)
+    stage_app="$stage_root/CleverClipboard.app"
     previous_app="$stage_root/previous.app"
     cleanup_stage() {
         if [[ -d "$previous_app" && ! -d "$app" ]]; then
@@ -68,7 +68,7 @@ else
     /bin/mkdir -p "$stage_app/Contents/MacOS" "$stage_app/Contents/Resources"
     xcrun swiftc -swift-version 5 -O -target arm64-apple-macos14.0 \
         -module-cache-path .build/module-cache "${swift_flags[@]}" Sources/*.swift \
-        -o "$stage_app/Contents/MacOS/LayaClipboard"
+        -o "$stage_app/Contents/MacOS/CleverClipboard"
     /bin/cp Info.plist "$stage_app/Contents/Info.plist"
     /bin/cp Resources/* "$stage_app/Contents/Resources/"
 
@@ -85,7 +85,7 @@ else
     print -r -- "$fingerprint" > "$stamp"
     cleanup_stage
     trap - EXIT
-    print 'Built and locally signed Cuekit.app.'
+    print 'Built and locally signed CleverClipboard.app.'
 fi
 
 if [[ "$launch" == true ]]; then

@@ -250,7 +250,7 @@ final class ClipboardStore {
             case .invalidPins: return "Saved entries are invalid or exceed the storage limit."
             case .invalidAsset: return "Choose one regular file under 50 MB."
             case .unsupportedImage: return "Use a PNG, JPEG, TIFF or HEIC image."
-            case .unreadableLibrary: return "Clipboard library could not be read. Existing files are preserved and saving is disabled. Restore Library.json from a backup, then restart Cuekit."
+            case .unreadableLibrary: return "Clipboard library could not be read. Existing files are preserved and saving is disabled. Restore Library.json from a backup, then restart CleverClipboard."
             }
         }
     }

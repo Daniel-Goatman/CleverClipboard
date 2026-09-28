@@ -83,6 +83,15 @@ final class PasteTrace: @unchecked Sendable {
 /// One durable journal per invocation. Content enters only after JevClient's key checks.
 /// Terminal stages describe dispatch, never target acceptance or correctness.
 final class SmartPasteDataset: @unchecked Sendable {
+    static let recordingPreference = "SaveSmartPasteDataset"
+
+    /// Unset preferences are false. Check before opening or creating any dataset files.
+    static func beginIfEnabled(defaults: UserDefaults = .standard,
+                               root: URL = SmartPasteDataset.defaultRoot) throws -> SmartPasteDataset? {
+        guard defaults.bool(forKey: recordingPreference) else { return nil }
+        return try SmartPasteDataset(root: root)
+    }
+
     enum Failure: LocalizedError {
         case write
         var errorDescription: String? { "Could not save the Smart Paste dataset. Nothing was pasted." }

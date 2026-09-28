@@ -21,7 +21,7 @@ def main():
         samples.append((label, {'context':'Input label: Fixture', 'items':[
             {'id':str(i),'text':text,'app':'Fixture','hint':'h'*1000,'source_context':'Source evidence '*60}
             for i in range(52)]}))
-    with tempfile.TemporaryDirectory(prefix='cuekit-parity-') as directory:
+    with tempfile.TemporaryDirectory(prefix='cleverclipboard-parity-') as directory:
         directory = Path(directory)
         fixtures = []
         for name, payload in samples:

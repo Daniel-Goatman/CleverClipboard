@@ -1,8 +1,8 @@
 import AppKit
 
 enum AppBrand {
-    static let name = "Cuekit"
-    static let icon: NSImage? = Bundle.main.url(forResource: "Cuekit", withExtension: "icns")
+    static let name = "CleverClipboard"
+    static let icon: NSImage? = Bundle.main.url(forResource: "CleverClipboard", withExtension: "icns")
         .flatMap { NSImage(contentsOf: $0) }
 
     // A native template version of the approved stepped-stack mark. No tile:

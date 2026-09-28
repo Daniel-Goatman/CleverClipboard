@@ -1,4 +1,4 @@
-#if CUEKIT_DEVELOPMENT
+#if CLEVERCLIPBOARD_DEVELOPMENT
 import Foundation
 import Darwin
 
@@ -10,7 +10,7 @@ final class DevelopmentDataset {
     private init(root: URL) { self.root = root }
 
     static func begin(request: [String: Any], ids: [String]) throws -> DevelopmentDataset? {
-        guard let path = ProcessInfo.processInfo.environment["CUEKIT_DATASET_ROOT"], !path.isEmpty else { return nil }
+        guard let path = ProcessInfo.processInfo.environment["CLEVERCLIPBOARD_DATASET_ROOT"], !path.isEmpty else { return nil }
         let recorder = DevelopmentDataset(root: URL(fileURLWithPath: path, isDirectory: true))
         try recorder.write("request", ["schema_version": 2, "record_id": recorder.id,
             "created_at": ISO8601DateFormatter().string(from: Date()), "request": request,

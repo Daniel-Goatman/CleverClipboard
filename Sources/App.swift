@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var copyMonitor: Any?
     private var activationMonitor: NSObjectProtocol?
     private var clipboardAssetID: String?
-    private let fileCaptureQueue = DispatchQueue(label: "cuekit.file-capture", qos: .utility)
+    private let fileCaptureQueue = DispatchQueue(label: "cleverclipboard.file-capture", qos: .utility)
     private var fileCaptureTask: DispatchWorkItem?
     private var fileCaptureGeneration = UUID()
     private var ready = false
@@ -173,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard let event, let data else { return noErr }
             let app = Unmanaged<AppDelegate>.fromOpaque(data).takeUnretainedValue()
             let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
             Logger(subsystem: "local.daniel.LayaClipboard", category: "shortcut").notice("pressed=\(pressed, privacy: .public)")
         #endif
             if pressed {
@@ -327,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc func smartPaste() {
         let dataset: SmartPasteDataset?
-        do { dataset = fixture ? nil : try SmartPasteDataset() }
+        do { dataset = fixture ? nil : try SmartPasteDataset.beginIfEnabled() }
         catch { showError(error.localizedDescription); return }
         let trace = PasteTrace(dataset: dataset)
         trace.record(.accepted, count: history.items.count)
@@ -346,11 +346,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             trace.record(.snapshot_started)
             let target = try InputTarget.snapshot()
             trace.record(.snapshot_ready)
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
             Logger(subsystem: "local.daniel.LayaClipboard", category: "context")
                 .notice("role=\(target.destinationRole, privacy: .public) caret_source=\(target.evidence.insertion?.source ?? "none", privacy: .public) ocr_needed=\(target.evidence.needsOCR, privacy: .public)")
         #endif
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
             let capability = InsertionContext.capabilitySummary(target.element)
             Logger(subsystem: "local.daniel.LayaClipboard", category: "context")
                 .notice("\(capability, privacy: .public) before_bytes=\(target.evidence.insertion?.before.utf8.count ?? 0, privacy: .public) after_bytes=\(target.evidence.insertion?.after.utf8.count ?? 0, privacy: .public)")
@@ -380,7 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                         case .success(let reply):
                             trace.record(.ranking_ready, count: reply.eligible,
                                          modelMS: reply.elapsed_ms ?? -1, queueMS: 0)
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
                             let safeDecision = ["jev", "latest"].contains(reply.decision)
                                 ? reply.decision : "unknown"
                             let originalIndex = items.firstIndex { $0.id == reply.model_choice } ?? -1
@@ -458,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         self.operationStatus = useLatestClipboard ? "Latest clipboard → \(target.appName)" : "Jev match → \(target.appName)"
         let totalMilliseconds = Date().timeIntervalSince(self.requestStarted) * 1000
         self.timing += String(format: " · %.0f ms to paste", totalMilliseconds)
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
         Logger(subsystem: "local.daniel.LayaClipboard", category: "performance").info("smart_paste_ms=\(totalMilliseconds, privacy: .public)")
         #endif
         self.rebuildMenu(); self.finishPulse()
@@ -698,7 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                                   backing: .buffered, defer: false)
             window.title = AppBrand.name
             CarbonTheme.apply(to: window)
-            window.setFrameAutosaveName("CuekitCarbonClipboard")
+            window.setFrameAutosaveName("CleverClipboardCarbonClipboard")
             window.center()
             window.contentView = NSHostingView(rootView: HistoryWindowView(model: historyModel))
             window.isReleasedWhenClosed = false
@@ -764,11 +764,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 840, height: 640),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Cuekit Settings"
+            window.title = "CleverClipboard Settings"
             CarbonTheme.apply(to: window)
             window.contentView = NSHostingView(rootView: SettingsView(model: settingsModel))
             window.isReleasedWhenClosed = false; window.delegate = self
-            window.setFrameAutosaveName("CuekitCarbonSettings"); window.center()
+            window.setFrameAutosaveName("CleverClipboardCarbonSettings"); window.center()
             settingsWindow = window
         }
         refreshSettingsModel()
@@ -820,7 +820,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 }
 
-@main struct LayaClipboardMain {
+@main struct CleverClipboardMain {
     static func main() {
         let app = NSApplication.shared
         // Explicit local diagnostic mode: capability names, lengths and fixture

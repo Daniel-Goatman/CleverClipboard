@@ -40,7 +40,7 @@ enum ItemPresentation {
 private final class PDFThumbnailCache: @unchecked Sendable {
     static let shared = PDFThumbnailCache()
     private let cache = NSCache<NSString, NSImage>()
-    private let queue = DispatchQueue(label: "cuekit.pdf-previews", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "cleverclipboard.pdf-previews", qos: .userInitiated)
     init() { cache.totalCostLimit = 16 * 1024 * 1024 }
     func load(_ url: URL) async -> NSImage? {
         guard url.isFileURL else { return nil }

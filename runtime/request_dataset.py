@@ -26,7 +26,7 @@ class RequestDataset:
     def __init__(self, root=None):
         project = Path(__file__).resolve().parents[1]
         self.root = Path(root) if root is not None else Path(os.environ.get(
-            'CUEKIT_DATASET_ROOT', str(project / 'results' / 'selection-dataset')))
+            'CLEVERCLIPBOARD_DATASET_ROOT', str(project / 'results' / 'selection-dataset')))
         paths = ['runtime/jev_selector.py', 'runtime/destination_context.py',
                  'runtime/context_evidence.py', 'Sources/CandidateText.swift', 'Sources/Context.swift']
         manifest = project / 'source-hashes.json'

@@ -5,11 +5,11 @@ import SwiftUI
     static func main() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        precondition(AppBrand.name == "Cuekit")
-        guard let icon = AppBrand.icon else { fatalError("Packaged Cuekit.icns is missing or unreadable") }
+        precondition(AppBrand.name == "CleverClipboard")
+        guard let icon = AppBrand.icon else { fatalError("Packaged CleverClipboard.icns is missing or unreadable") }
         precondition(icon.representations.count >= 8, "Icon must include multiple standard and Retina sizes")
         precondition(AppBrand.menuIcon.isTemplate)
-        precondition(AppBrand.menuIcon.accessibilityDescription == "Cuekit")
+        precondition(AppBrand.menuIcon.accessibilityDescription == "CleverClipboard")
         precondition(AppBrand.menuIcon.size == NSSize(width: 20, height: 18))
         guard let data = AppBrand.menuIcon.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: data) else { fatalError("Menu glyph does not render") }

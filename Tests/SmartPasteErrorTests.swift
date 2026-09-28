@@ -49,7 +49,7 @@ import Vision
             ("secure-input", secure, ["Secure keyboard input", "Dismiss"]),
             ("storage", storage, ["Nothing was pasted", "save this attempt", "Dismiss"]),
             ("storage-after-paste", postStorage, ["Dataset recording incomplete", "Paste events were sent", "Dismiss"]),
-            ("connection", network, ["Nothing was pasted", "Dismiss", "Open Cuekit Settings", "internet"]),
+            ("connection", network, ["Nothing was pasted", "Dismiss", "Open CleverClipboard Settings", "internet"]),
             ("clipboard-changed", changed, ["Nothing was pasted", "Dismiss", "clipboard changed"])
         ] {
             let host = NSHostingView(rootView: SmartPasteErrorView(failure: failure, dismiss: {}, recover: { _ in }))
@@ -68,7 +68,7 @@ import Vision
             let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
             for word in required { precondition(text.localizedCaseInsensitiveContains(word), "Missing rendered control: \(word) in \(text)") }
             precondition(!text.contains(untrusted))
-            if failure.recovery == nil { precondition(!text.contains("Open Cuekit Settings")) }
+            if failure.recovery == nil { precondition(!text.contains("Open CleverClipboard Settings")) }
             window.orderOut(nil)
         }
         print("PASS: offscreen production error views, readable recovery controls, nonactivating panel reuse and dismissal")

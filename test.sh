@@ -12,7 +12,7 @@ swift=(xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache)
 core=(Sources/Diagnostics.swift Sources/Context.swift Sources/History.swift Sources/CandidateText.swift Sources/DestinationContext.swift Sources/JevRequest.swift)
 client=("${core[@]}" Sources/JevCredential.swift Sources/JevClient.swift Sources/DevelopmentDataset.swift)
 "${swift[@]}" -typecheck Sources/*.swift
-"${swift[@]}" -D CUEKIT_DEVELOPMENT -typecheck Sources/*.swift
+"${swift[@]}" -D CLEVERCLIPBOARD_DEVELOPMENT -typecheck Sources/*.swift
 "${swift[@]}" Sources/History.swift Tests/HistoryTests.swift -o .build/history-tests
 .build/history-tests
 "${swift[@]}" Sources/Diagnostics.swift Sources/Context.swift Tests/ContextTests.swift -o .build/context-tests
@@ -30,7 +30,7 @@ python3 -m unittest discover -s Tests -p 'test_*.py' -v
 .build/storage-tests
 "${swift[@]}" "${client[@]}" Tests/JevClientTests.swift -o .build/client-tests
 .build/client-tests
-"${swift[@]}" -D CUEKIT_DEVELOPMENT "${client[@]}" Tests/JevClientTests.swift -o .build/development-client-tests
+"${swift[@]}" -D CLEVERCLIPBOARD_DEVELOPMENT "${client[@]}" Tests/JevClientTests.swift -o .build/development-client-tests
 .build/development-client-tests
 "${swift[@]}" "${client[@]}" Sources/CarbonTheme.swift Sources/TypeSafeKeyWindow.swift Tests/TypeSafeKeyTests.swift -o .build/key-tests
 .build/key-tests

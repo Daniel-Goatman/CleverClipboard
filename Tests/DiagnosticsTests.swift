@@ -2,6 +2,7 @@ import Foundation
 
 @main struct DiagnosticsTests {
     static func main() throws {
+        try testDatasetOptIn()
         try testDataset()
         var lines: [String] = []
         let trace = PasteTrace { lines.append($0) }
@@ -38,8 +39,44 @@ import Foundation
         }
         print("PASS: correlated numeric diagnostics, busy state, one terminal outcome, static reasons and unknown-message privacy")
     }
+    static func testDatasetOptIn() throws {
+        // Volatile preferences never write the user's actual recording setting.
+        let defaults = UserDefaults(suiteName: "cleverclipboard-test-\(UUID().uuidString)")!
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cleverclipboard-opt-in-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        precondition(defaults.object(forKey: SmartPasteDataset.recordingPreference) == nil)
+        let absent = try SmartPasteDataset.beginIfEnabled(defaults: defaults, root: root)
+        precondition(absent == nil, "Fresh installs must not record")
+        precondition(!FileManager.default.fileExists(atPath: root.path), "Disabled recording must not create the directory")
+
+        defaults.setVolatileDomain([SmartPasteDataset.recordingPreference: true], forName: UserDefaults.argumentDomain)
+        let enabled = try SmartPasteDataset.beginIfEnabled(defaults: defaults, root: root)
+        precondition(enabled != nil, "Explicit opt-in must start recording")
+        let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        precondition(files.count == 1 && files[0].pathExtension == "jsonl")
+        let original = try Data(contentsOf: files[0])
+
+        defaults.setVolatileDomain([SmartPasteDataset.recordingPreference: false], forName: UserDefaults.argumentDomain)
+        let disabled = try SmartPasteDataset.beginIfEnabled(defaults: defaults, root: root)
+        precondition(disabled == nil, "Opt-out must stop new journals")
+        let remaining = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        let preserved = try Data(contentsOf: files[0])
+        precondition(remaining == files && preserved == original, "Opt-out must preserve existing records")
+
+        // An unusable output path must not break Smart Paste when recording is off.
+        let invalid = files[0].appendingPathComponent("not-a-directory")
+        let skipped = try SmartPasteDataset.beginIfEnabled(defaults: defaults, root: invalid)
+        precondition(skipped == nil)
+        defaults.setVolatileDomain([SmartPasteDataset.recordingPreference: true], forName: UserDefaults.argumentDomain)
+        do {
+            _ = try SmartPasteDataset.beginIfEnabled(defaults: defaults, root: invalid)
+            fatalError("Enabled recording must still fail closed on a storage error")
+        } catch { }
+        print("PASS: dataset default off, explicit opt-in, opt-out preserves records, disabled recording bypasses storage failures")
+    }
+
     static func testDataset() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cuekit-attempts-\(UUID().uuidString)")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cleverclipboard-attempts-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         for reason in [PasteReason.accessibility, .worker_unavailable, .worker_busy, .secure_input] {
             let dataset = try SmartPasteDataset(root: root)

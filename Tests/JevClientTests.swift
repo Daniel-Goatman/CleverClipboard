@@ -51,9 +51,9 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
         precondition(predicate(), "Native client callback timed out")
     }
     static func main() throws {
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent("cuekit-client-tests-\(UUID().uuidString)")
-        setenv("CUEKIT_DATASET_ROOT", output.path, 1)
-        defer { unsetenv("CUEKIT_DATASET_ROOT"); try? FileManager.default.removeItem(at: output) }
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("cleverclipboard-client-tests-\(UUID().uuidString)")
+        setenv("CLEVERCLIPBOARD_DATASET_ROOT", output.path, 1)
+        defer { unsetenv("CLEVERCLIPBOARD_DATASET_ROOT"); try? FileManager.default.removeItem(at: output) }
         let attempts = output.appendingPathExtension("attempts")
         defer { try? FileManager.default.removeItem(at: attempts) }
         let config = URLSessionConfiguration.ephemeral
@@ -143,7 +143,7 @@ private final class MockJevProtocol: URLProtocol, @unchecked Sendable {
         }
         precondition(requests == 5 && responses == 3 && failures == 4)
         print("PASS: durable request/response journals; fallback and failures; configured secret rejected before persistence")
-        #if CUEKIT_DEVELOPMENT
+        #if CLEVERCLIPBOARD_DEVELOPMENT
         let records = try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil)
         precondition(!records.isEmpty)
         for url in records {

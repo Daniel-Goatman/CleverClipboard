@@ -90,7 +90,7 @@ import Foundation
         precondition(source(observed("Safari", "com.apple.Safari", "Revenue", "1200"),
                             "1200", "com.apple.Safari").fieldLabel == "Revenue")
         let restoredCopy = ClipProvenance.ownWrite(original: safari)
-        precondition(restoredCopy.writer == "Jev Clipboard" && restoredCopy.sourceApp == "Safari")
+        precondition(restoredCopy.writer == "CleverClipboard" && restoredCopy.sourceApp == "Safari")
         precondition(restoredCopy.fieldLabel == nil && restoredCopy.association == "own_write")
         var occurrences = History()
         precondition(occurrences.add("1200", app: "Safari", provenance: safari))

@@ -66,7 +66,7 @@ struct TypeSafeKeyView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Connect to TypeSafe", systemImage: "key.fill")
                 .font(.system(size: 22, weight: .medium))
-            Text("Enter your API key to enable Smart Paste. Cuekit verifies it with TypeSafe before saving it in macOS Keychain.")
+            Text("Enter your API key to enable Smart Paste. CleverClipboard verifies it with TypeSafe before saving it in macOS Keychain.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.saved {
                 Label("Key verified and saved", systemImage: "checkmark.circle.fill")

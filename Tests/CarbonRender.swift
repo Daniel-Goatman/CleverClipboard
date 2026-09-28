@@ -28,18 +28,18 @@ import Vision
         let imageBytes = imageData.count, pdfBytes = pdfData.count
         let date = Date(timeIntervalSince1970: 1790416800)
         model.items = [
-            Clip(id: "text", text: "Could you send me the Cuekit overview before our call?", app: "Mail", copiedAt: date),
-            Clip(id: "link", text: "https://cuekit.example", app: "Safari", copiedAt: date),
+            Clip(id: "text", text: "Could you send me the CleverClipboard overview before our call?", app: "Mail", copiedAt: date),
+            Clip(id: "link", text: "https://cleverclipboard.example", app: "Safari", copiedAt: date),
             Clip(id: "image", text: "", app: "Preview", copiedAt: date, kind: .image, imageBytes: imageBytes),
-            Clip(id: "pdf", text: "", app: "Finder", copiedAt: date, kind: .file, assetID: "pdf", fileName: "Cuekit overview.pdf", fileType: "com.adobe.pdf", fileBytes: pdfBytes)
+            Clip(id: "pdf", text: "", app: "Finder", copiedAt: date, kind: .file, assetID: "pdf", fileName: "CleverClipboard overview.pdf", fileType: "com.adobe.pdf", fileBytes: pdfBytes)
         ]
         model.imageURL = { _ in imageURL }; model.fileURL = { _ in pdfURL }
-        var photo = PinnedEntry(id: 1, description: "Cuekit app icon for listings and press kits", value: "")
-        photo.kind = .image; photo.assetID = "photo"; photo.assetName = "Cuekit icon.png"; photo.assetType = "public.png"; photo.assetBytes = imageBytes
-        var file = PinnedEntry(id: 2, description: "Cuekit product overview to share with new users", value: "")
-        file.kind = .file; file.assetID = "pdf"; file.assetName = "Cuekit overview.pdf"; file.assetType = "com.adobe.pdf"; file.assetBytes = pdfBytes
-        model.updatePins([PinnedEntry(id: 0, description: "Public website for Cuekit", value: "https://cuekit.example"), photo, file,
-                          PinnedEntry(id: 3, description: "Cuekit support email", value: "support@cuekit.example")])
+        var photo = PinnedEntry(id: 1, description: "CleverClipboard app icon for listings and press kits", value: "")
+        photo.kind = .image; photo.assetID = "photo"; photo.assetName = "CleverClipboard icon.png"; photo.assetType = "public.png"; photo.assetBytes = imageBytes
+        var file = PinnedEntry(id: 2, description: "CleverClipboard product overview to share with new users", value: "")
+        file.kind = .file; file.assetID = "pdf"; file.assetName = "CleverClipboard overview.pdf"; file.assetType = "com.adobe.pdf"; file.assetBytes = pdfBytes
+        model.updatePins([PinnedEntry(id: 0, description: "Public website for CleverClipboard", value: "https://cleverclipboard.example"), photo, file,
+                          PinnedEntry(id: 3, description: "CleverClipboard support email", value: "support@cleverclipboard.example")])
         model.assetURL = { $0.kind == .image ? imageURL : pdfURL }
         model.onSavePins = { [weak model] entries in model?.updatePins(entries); return true }
         model.onDelete = { [weak model] id in model?.items.removeAll { $0.id == id } }
@@ -50,7 +50,7 @@ import Vision
         let size = NSSize(width: 1000, height: 680)
         if !CommandLine.arguments.contains("--interactive-only") {
         try render(HistoryWindowView(model: model), size: size, name: "history", out: out, required: ["History", "Always Available", "Copy", "Clear History"], forbidden: ["Pause", "Resume"])
-        model.beginEditing(); model.drafts[3].description = "Support email address for Cuekit"
+        model.beginEditing(); model.drafts[3].description = "Support email address for CleverClipboard"
         try render(HistoryWindowView(model: model, initialTab: 1), size: size, name: "always-available", out: out, required: ["Description", "Value", "Save Changes", "Unsaved changes"])
         try render(HistoryWindowView(model: model, initialTab: 1), size: NSSize(width: 820, height: 560), name: "always-available-minimum", out: out, required: ["Save Changes", "Add Entry"])
         for page in SettingsPage.allCases {
@@ -153,7 +153,7 @@ private final class DemoOverviewView: NSView {
                 .foregroundColor: NSColor.black
             ])
         }
-        text("Cuekit", y: 54, size: 32, bold: true)
+        text("CleverClipboard", y: 54, size: 32, bold: true)
         text("Product overview · illustrative demo document", y: 105, size: 12)
         text("A clipboard companion for macOS", y: 168, size: 21, bold: true)
         text("Keep recent clips in History and save reusable text, links, images and files in Always Available.", y: 213, size: 15)
@@ -161,7 +161,7 @@ private final class DemoOverviewView: NSView {
         text("Search recent clips, inspect their contents and copy an item again.", y: 354, size: 15)
         text("Always Available", y: 450, size: 18, bold: true)
         text("Give each saved value a description that explains what it is and where it belongs. Save your changes to keep it available.", y: 489, size: 15)
-        text("Example: “Public website for Cuekit” describes a website URL. It is not an instruction to wait for someone to request a link.", y: 616, size: 14)
+        text("Example: “Public website for CleverClipboard” describes a website URL. It is not an instruction to wait for someone to request a link.", y: 616, size: 14)
         text("All .example addresses in this preview are fictional.", y: 754, size: 11)
     }
 }

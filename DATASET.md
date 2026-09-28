@@ -1,8 +1,21 @@
 # Local Smart Paste training dataset
 
-Normal builds record every Smart Paste invocation automatically, including invocations
+Dataset recording is **off by default**. To enable it for your macOS user account,
+run the following command and restart CleverClipboard:
+
+```sh
+defaults write local.daniel.LayaClipboard SaveSmartPasteDataset -bool true
+```
+
+To disable it, run the command with `-bool false` and restart. This preference stays
+on your Mac; it is not committed or inherited by people cloning the repository.
+The domain retains the app's original bundle identifier for compatibility.
+
+When enabled, normal builds record every Smart Paste invocation, including invocations
 rejected as busy and attempts that stop before inference. Launching from Applications
-requires no environment variable. Demo mode does not record.
+requires no environment variable. Demo mode does not record. When disabled, Smart Paste
+does not create or open dataset files, and dataset storage failures do not block it.
+Disabling recording does not delete existing records.
 
 Location: `~/Library/Application Support/Jev Clipboard/SmartPasteDataset/`.
 Each invocation creates a UUID-named `.attempt.jsonl` journal (schema 3), retained
@@ -27,7 +40,7 @@ by the content-free diagnostic trace.
   inference time. It is saved before returning the selection to the paste flow.
 - `inference_failed`: an allowlisted reason, never an arbitrary error body.
 
-Early failures and busy invocations have their own files even when there is no model
+When recording is enabled, early failures and busy invocations have their own files even when there is no model
 request. Cancellation and normal app shutdown have terminal stages. A model response
 may arrive after a cancellation; it does not change that attempt's cancelled outcome.
 An abrupt crash can leave no terminal stage or an incomplete final line: ignore only
@@ -47,7 +60,7 @@ Jev; they cannot reconstruct omitted/truncated context. Images and file bytes ar
 not copied into this dataset. Authentication headers and the configured API key are
 excluded. Content that fails the existing configured-key checks is rejected before
 request persistence; the rejected attempt still has a metadata-only record. Other
-private information present in model inputs is retained, as authorized for training.
+private information present in model inputs is retained when recording is enabled.
 Malformed/secret-bearing responses and raw HTTP error bodies are not recorded.
 
 Writes are serialized within an attempt and synchronized to disk. Unsafe output
@@ -67,8 +80,9 @@ and unlabelled examples distinguishable when preparing training/evaluation split
 ## Legacy development recorder
 
 The optional schema-2 development recorder remains available with `--development`
-and `CUEKIT_DATASET_ROOT`. Normal builds ignore that environment variable. Enabling
-it creates an additional request/result export alongside the always-on attempt journal;
-it is not needed for everyday collection. Existing records remain compatible and are
+and `CLEVERCLIPBOARD_DATASET_ROOT`. Normal builds ignore that environment variable. Enabling
+it creates an independent request/result export, even if attempt recording is disabled.
+Both recorders are opt-in; the development recorder is not needed for attempt collection.
+Existing records remain compatible and are
 not migrated or deleted. Synthetic tests use isolated temporary folders and mock
 transport; they do not record real clipboard content or call the hosted model.

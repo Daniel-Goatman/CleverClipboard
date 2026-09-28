@@ -55,7 +55,7 @@ struct ClipProvenance: Codable, Equatable {
     }
     static func ownWrite(original: ClipProvenance?) -> ClipProvenance {
         ClipProvenance(sourceApp: original?.sourceApp, sourceBundleID: original?.sourceBundleID,
-                       writer: "Jev Clipboard", foregroundAtPoll: original?.foregroundAtPoll,
+                       writer: "CleverClipboard", foregroundAtPoll: original?.foregroundAtPoll,
                        association: "own_write", windowTitle: nil, fieldLabel: nil,
                        fieldIdentifier: nil,
                        declaredSource: nil)
