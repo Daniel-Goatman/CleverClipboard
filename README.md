@@ -1,61 +1,56 @@
 <p align="center">
-  <img src="docs/media/banner.svg" alt="CleverClipboard — macOS clipboard history and Smart Paste" width="100%">
+  <img src="docs/media/banner.svg" alt="CleverClipboard — Smart Paste with TypeSafe’s Jev" width="100%">
 </p>
 
 <p align="center">
-  A macOS clipboard manager with an experimental Smart Paste shortcut.<br>
-  Personal hobby project. Written in Swift and SwiftUI.
-</p>
-
-<p align="center">
-  <a href="#try-it">Try it</a> ·
-  <a href="#smart-paste">Smart Paste</a> ·
-  <a href="#data-and-privacy">Data and privacy</a> ·
+  <a href="#smart-paste">How it works</a> ·
+  <a href="#set-up-with-an-agent">Agent setup prompt</a> ·
+  <a href="#manual-setup">Manual setup</a> ·
   <a href="docs/GUIDE.md">Full guide</a>
 </p>
 
----
-
-## Clipboard history
-
-CleverClipboard runs in the menu bar and stores recent text, links, images, and files. You can search your history, preview an item, and copy it again.
-
-![CleverClipboard History: searchable clips on the left, with the selected link and its source on the right.](docs/media/history.png)
-
-*The real app, filled with made-up demo data.*
-
-| History | Always Available | Smart Paste |
-| :--- | :--- | :--- |
-| Search and preview recent copies. | Store saved text, images, and files with descriptions. | Press **⌘⇧V** to select an existing clip using destination context. |
-
-## Saved entries
-
-**Always Available** stores entries separately from recent history. It supports text, images, and files. Clearing history doesn't remove saved entries.
-
-<details>
-<summary><strong>Saved entries screenshot</strong></summary>
-
-![CleverClipboard Always Available: saved descriptions and values, including a fictional support email, address, meeting link, and sign-off.](docs/media/always-available.png)
-
-Give an entry a useful description, add its value, then choose **Save Changes** (⌘S).
-
-</details>
-
 ## Smart Paste
 
-Smart Paste sends destination context and eligible clipboard entries to TypeSafe Jev, which selects an existing item to paste.
+CleverClipboard uses **TypeSafe’s Jev** to choose what to paste from your clipboard history and saved entries. It runs in the macOS menu bar; **⌘⇧V** triggers selection and **⌘V** keeps its normal behaviour.
 
-1. **Copy a few things** as you normally would.
-2. **Click where you want to paste**, then press **⌘⇧V**.
-3. **TypeSafe Jev chooses an existing item** using destination context and eligible clips. It doesn't write new text.
+When you press **⌘⇧V**:
 
-Regular **⌘V** still works normally. If the model returns no match or confidence of 70% or less, Smart Paste falls back to the latest clipboard item. Network or invalid-response errors paste nothing.
+1. The app reads the destination through Accessibility: the focused field, nearby text, and insertion context where available. Optional local OCR supplements missing context.
+2. It sends that context and eligible clipboard candidates to Jev, including saved-entry descriptions, source app, and recency.
+3. Jev selects an existing item. The app checks that the destination and clipboard haven't changed, then pastes it. It doesn't generate or rewrite the content.
 
-Selection can be wrong, and some apps expose limited context. Check important pastes.
+A valid no-match response or confidence of 70% or less falls back to the latest clipboard item. Network errors and invalid responses paste nothing. See the [context contract](CONTEXT_CONTRACT.md) for the request boundaries and capture limitations.
 
-## Try it
+## Set up with an agent
 
-You'll need **an Apple Silicon Mac, macOS 14+, and Xcode command-line tools** to build. Smart Paste also needs your own **TypeSafe API key** and an internet connection; API usage may cost money.
+Copy this into Codex, Claude Code, or another coding agent running on your Mac:
+
+```text
+Set up and run https://github.com/Daniel-Goatman/CleverClipboard on this Mac.
+
+Clone the repository, or use the existing checkout if one is already present.
+Read its README, docs/GUIDE.md, and any repository instructions first.
+Check for Apple Silicon, macOS 14+, Xcode command-line tools, and Python 3
+for the launch helper and tests. Explain any missing prerequisites.
+
+Run the offline tests with ./test.sh, then build and launch the app with
+./build.sh --launch. If another checkout is running, show me which one;
+don't stop it without asking.
+
+Guide me through entering my TypeSafe API key in the app's
+“TypeSafe API Key…” window and granting Accessibility permission.
+Don't ask me to paste the key into chat or a shell command.
+Explain the optional Screen Recording permission for local OCR.
+
+Leave dataset recording off for a fresh setup, and preserve any existing
+local recording preference. Don't send my clipboard contents to Jev as a
+test automatically. Once the app is ready, tell me how to try ⌘⇧V myself
+and report any unresolved setup issues.
+```
+
+## Manual setup
+
+Requires **Apple Silicon, macOS 14+, Xcode command-line tools, Python 3**, and a **TypeSafe API key**.
 
 ```sh
 git clone https://github.com/Daniel-Goatman/CleverClipboard.git
@@ -63,29 +58,48 @@ cd CleverClipboard
 ./build.sh --launch
 ```
 
-Then, from the menu-bar icon:
+From the menu-bar icon:
 
 1. Open **TypeSafe API Key…** and choose **Verify & Save**. The key is stored in macOS Keychain.
 2. Choose **Allow Accessibility…** and grant access in System Settings. Screen Recording is optional, for local OCR.
-3. Copy a few items and try **⌘⇧V**, or choose **Open Clipboard…** to browse them yourself.
+3. Copy a few items, focus a destination, and press **⌘⇧V**.
 
-The build script makes a locally signed app. There isn't a notarized downloadable release yet. See the [setup and troubleshooting guide](docs/GUIDE.md#build-and-run) if permissions stop working after rebuilding.
+The build script creates a locally signed app. See the [full guide](docs/GUIDE.md#build-and-run) for build options and permission troubleshooting.
 
-## Data and privacy
+## Clipboard history
 
-**Smart Paste uses a hosted model.** It sends bounded clipboard text, destination text, and candidate metadata to `api.typesafe.ai`. Image pixels and file bytes stay local; extracted OCR text may be sent.
+Recent text, links, images, and files are stored locally. Choose **Open Clipboard…** from the menu to search, preview, and copy an item again.
 
-History and saved entries live on your Mac and aren't encrypted by the app. **Dataset recording is off by default.** You can optionally save Smart Paste attempts locally for evaluation or training. These records can contain clipboard excerpts and destination text; they aren't encrypted by the app or automatically uploaded. **Clear History does not delete dataset records.**
+![CleverClipboard History: searchable clips on the left, with the selected link and its source on the right.](docs/media/history.png)
 
-To enable recording for your macOS user account, run this and restart the app:
+*Native app screenshot with synthetic data.*
+
+## Saved entries
+
+**Always Available** stores text, images, and files separately from recent history. Each entry has a description that Jev can use when selecting a candidate. Clearing history doesn't remove saved entries.
+
+<details>
+<summary><strong>Saved entries screenshot</strong></summary>
+
+![CleverClipboard Always Available: saved descriptions and values, including a fictional support email, address, meeting link, and sign-off.](docs/media/always-available.png)
+
+Add a description and value, then choose **Save Changes** (⌘S).
+
+</details>
+
+## Data and recording
+
+Jev receives bounded clipboard text, destination context, and candidate metadata through `api.typesafe.ai`. Image pixels and file bytes stay local; extracted OCR text may be included in the request.
+
+**Dataset recording is off by default.** To save Smart Paste attempts locally for evaluation or training, run this and restart the app:
 
 ```sh
 defaults write local.daniel.LayaClipboard SaveSmartPasteDataset -bool true
 ```
 
-Use `-bool false` to disable it, then restart. This is a local preference; it isn't included when someone clones the repository. The preference domain retains an older internal identifier for compatibility.
+Use `-bool false` and restart to disable it. This is a per-user macOS preference, independent of the checkout. The domain keeps an older internal identifier for compatibility.
 
-Read the [storage and privacy details](docs/GUIDE.md#clipboard-data) and [dataset notes](DATASET.md) before trying it with private content.
+Records can contain clipboard excerpts and destination text. They aren't automatically uploaded, and **Clear History does not delete them**. History, saved entries, and dataset records aren't encrypted by the app. See [DATASET.md](DATASET.md) for the format and [the guide](docs/GUIDE.md#clipboard-data) for storage details.
 
 ## Development
 
@@ -99,10 +113,8 @@ The app uses native Swift networking and has no third-party runtime packages or 
 | Topic | Documentation |
 | :--- | :--- |
 | Setup, limits, permissions, and selection behaviour | [Full guide](docs/GUIDE.md) |
-| What the model sees | [Context contract](CONTEXT_CONTRACT.md) |
+| What Jev sees | [Context contract](CONTEXT_CONTRACT.md) |
 | Local attempt records | [Dataset notes](DATASET.md) |
 | The icon and dark interface | [Design notes](docs/branding/README.md) |
-
----
 
 No open-source license has been chosen yet.
